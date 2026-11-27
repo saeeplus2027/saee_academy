@@ -88,28 +88,92 @@ $('#adminLogout').addEventListener('click', async () => {
   location.href = 'index.html';
 });
 
-$$('.admin-tabs button').forEach(button => button.addEventListener('click', () => {
+$$('.admin-tabs button').forEach(button => button.addEventListener('click', async () => {
   $$('.admin-tabs button').forEach(item => item.classList.toggle('active', item === button));
   $$('[id^="tab-"]').forEach(panel => panel.classList.add('hidden'));
   $('#tab-' + button.dataset.tab).classList.remove('hidden');
+
+  // Refresh both catalog lists whenever the admin opens either add form.
+  // This prevents a newly-added specialization/course from being missing
+  // in a dropdown that was rendered before the new record was created.
+  if (button.dataset.tab === 'courses' || button.dataset.tab === 'videos') {
+    await loadSpecializations();
+    await loadCourses();
+  }
 }));
 
 async function loadAll() {
+  // Load specializations before courses so both add forms have real options.
   await loadSpecializations();
   await Promise.all([loadRequests(), loadCourses(), loadUsers(), loadSiteContent()]);
-  await loadVideos();
+}
+
+function fillSelect(select, items, placeholder, labelOf, emptyLabel = 'لا توجد بيانات متاحة') {
+  if (!select) return;
+  const previous = select.value;
+  const rows = Array.isArray(items) ? items : [];
+  const firstLabel = rows.length ? placeholder : emptyLabel;
+  select.innerHTML = `<option value="">${esc(firstLabel)}</option>` + rows.map(item =>
+    `<option value="${esc(item.id)}">${esc(labelOf(item))}</option>`
+  ).join('');
+  select.disabled = rows.length === 0;
+  if (previous && rows.some(item => String(item.id) === String(previous))) {
+    select.value = previous;
+  } else {
+    select.value = '';
+  }
+}
+
+function populateCourseSpecializationSelect() {
+  fillSelect(
+    $('#courseSpecialization'),
+    adminSpecializations,
+    'اختر التخصص الذي ستُنشر فيه المادة',
+    item => item.name,
+    'أضف تخصصاً أولاً من قسم التخصصات'
+  );
+}
+
+function populateVideoSpecializationSelect() {
+  fillSelect(
+    $('#videoSpecialization'),
+    adminSpecializations,
+    'اختر التخصص لعرض مواده',
+    item => `${item.name} (${Number(item.course_count || 0)} مادة)`,
+    'لا توجد تخصصات مضافة؛ أضف تخصصاً أولاً'
+  );
+  populateVideoCourseSelect();
+}
+
+function populateVideoCourseSelect() {
+  const specializationId = $('#videoSpecialization')?.value || '';
+  const availableCourses = specializationId
+    ? adminCourses.filter(course => String(course.specialization_id) === String(specializationId))
+    : [];
+  const previousCourseId = $('#videoCourse')?.value || '';
+  fillSelect(
+    $('#videoCourse'),
+    availableCourses,
+    'اختر المادة التي سيُضاف إليها الفيديو',
+    item => item.name,
+    specializationId ? 'لا توجد مواد ضمن هذا التخصص' : 'اختر التخصص أولاً'
+  );
+  if (previousCourseId && availableCourses.some(course => String(course.id) === String(previousCourseId))) {
+    $('#videoCourse').value = previousCourseId;
+  }
 }
 
 async function loadSpecializations() {
   try {
     const result = await api('/api/admin/specializations');
-    adminSpecializations = result.items || [];
-    const options = adminSpecializations.map(item =>
-      `<option value="${esc(item.id)}">${esc(item.name)}</option>`
-    ).join('');
-    if ($('#courseSpecialization')) $('#courseSpecialization').innerHTML = options;
+    adminSpecializations = Array.isArray(result.items) ? result.items : [];
+    populateCourseSpecializationSelect();
+    populateVideoSpecializationSelect();
     renderAdminSpecializations();
   } catch (error) {
+    adminSpecializations = [];
+    populateCourseSpecializationSelect();
+    populateVideoSpecializationSelect();
     $('#adminSpecializationsList').textContent = error.message;
     toast(error.message);
   }
@@ -184,14 +248,13 @@ $('#adminSpecializationsList').addEventListener('click', async event => {
 async function loadCourses() {
   try {
     const result = await api('/api/admin/courses');
-    adminCourses = result.items || [];
-    const options = adminCourses.map(item =>
-      `<option value="${esc(item.id)}">${esc(item.name)}</option>`
-    ).join('');
-    if ($('#videoCourse')) $('#videoCourse').innerHTML = options;
+    adminCourses = Array.isArray(result.items) ? result.items : [];
+    populateVideoCourseSelect();
     renderAdminCourses();
     await loadVideos();
   } catch (error) {
+    adminCourses = [];
+    populateVideoCourseSelect();
     $('#adminCoursesList').textContent = error.message;
     toast(error.message);
   }
@@ -323,7 +386,17 @@ async function loadVideos() {
   const courseId = $('#videoCourse')?.value;
   const target = $('#adminVideosList');
   if (!courseId) {
-    if (target) target.innerHTML = '<div class="empty-state">أضف مادة أولاً لعرض فيديوهاتها.</div>';
+    if (target) {
+      const hasSpecialization = Boolean($('#videoSpecialization')?.value);
+      const text = !adminSpecializations.length
+        ? 'أضف تخصصاً أولاً من قسم التخصصات.'
+        : !adminCourses.length
+          ? 'لا توجد مواد بعد. أضف مادة أولاً.'
+          : hasSpecialization
+            ? 'لا توجد مواد ضمن التخصص المحدد، أو لم تختر مادة بعد.'
+            : 'اختر التخصص ثم المادة لعرض فيديوهاتها.';
+      target.innerHTML = `<div class="empty-state">${esc(text)}</div>`;
+    }
     return;
   }
   try {
@@ -343,6 +416,10 @@ async function loadVideos() {
   }
 }
 
+$('#videoSpecialization').addEventListener('change', () => {
+  populateVideoCourseSelect();
+  loadVideos();
+});
 $('#videoCourse').addEventListener('change', loadVideos);
 $('#adminVideosList').addEventListener('click', async event => {
   const id = event.target.dataset.deleteVideo;

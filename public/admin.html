@@ -48,7 +48,9 @@
       <h2>إضافة مادة جديدة</h2>
       <form id="courseForm" class="admin-form">
         <label>اسم المادة<input name="name" required maxlength="120"></label>
-        <label>التخصص<select name="specialization_id" id="courseSpecialization" required></select></label>
+        <label>التخصص<select name="specialization_id" id="courseSpecialization" required>
+          <option value="">جارٍ تحميل التخصصات...</option>
+        </select><small class="field-help">ستظهر هنا جميع التخصصات التي أضفتها من قسم التخصصات.</small></label>
         <label>اسم الشارح<input name="instructor_name" required maxlength="100"></label>
         <label>السعر بالدينار<input name="price_jod" type="number" min="0" max="10000" step="0.01" required></label>
         <label class="wide">وصف المادة<textarea name="description" rows="3"></textarea></label>
@@ -74,7 +76,12 @@
       <h2>إدارة فيديوهات المواد</h2>
       <p class="muted">يمكن رفع حتى 30 فيديو لكل مادة. يمكن حذف أي فيديو من القائمة.</p>
       <form id="videoForm" class="admin-form">
-        <label>المادة<select name="course_id" id="videoCourse" required></select></label>
+        <label>التخصص<select id="videoSpecialization" required>
+          <option value="">جارٍ تحميل التخصصات...</option>
+        </select><small class="field-help">اختر التخصص أولاً لعرض مواده فقط.</small></label>
+        <label>المادة<select name="course_id" id="videoCourse" required disabled>
+          <option value="">اختر التخصص أولاً</option>
+        </select></label>
         <label>عنوان الفيديو<input name="title" required maxlength="140"></label>
         <label class="wide">ملف الفيديو<input name="file" type="file" accept="video/*" required></label>
         <button class="btn btn-primary">رفع الفيديو</button><div id="videoMessage" class="form-error wide"></div>
@@ -126,5 +133,5 @@
   </section>
 </main>
 <div id="adminToast" class="toast"></div>
-<script src="config.js"></script><script src="admin.js"></script>
+<script src="config.js"></script><script src="admin.js?v=20261127-specialization-dropdown-fix"></script>
 </body></html>
