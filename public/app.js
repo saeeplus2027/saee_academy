@@ -289,7 +289,7 @@ async function refreshUser() {
 }
 
 function setProtectedPageMessage(message) {
-  const target = $('#specializationGrid') || $('#courseGrid') || $('#coursePage');
+  const target = $('#questionCourseGrid') || $('#specializationGrid') || $('#courseGrid') || $('#coursePage');
   if (target) target.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
 }
 
@@ -297,7 +297,138 @@ async function loadProtectedPage() {
   if (page === 'specializations') await loadSpecializations();
   if (page === 'courses') await loadCourses();
   if (page === 'course') await loadCourseDetail();
+  if (page === 'questions') await loadQuestionLibrary();
 }
+
+
+let questionCoursesById = new Map();
+
+async function loadQuestionLibrary() {
+  const grid = $('#questionCourseGrid');
+  if (!grid) return;
+  try {
+    const result = await api('/api/question-files', {cache: 'no-store'});
+    const items = Array.isArray(result.items) ? result.items : [];
+    questionCoursesById = new Map(items.map(item => [item.id, item]));
+    if (!items.length) {
+      grid.innerHTML = '<div class="empty-state">لا توجد مواد منشورة في المكتبة حالياً.</div>';
+      return;
+    }
+    grid.innerHTML = items.map(course => `
+      <article class="course-card question-course-card">
+        <button class="question-course-open" type="button" data-question-course="${escapeHtml(course.id)}">
+          <span class="question-course-icon">PDF</span>
+          <span class="question-course-copy">
+            <b>${escapeHtml(course.name)}</b>
+            <small>${escapeHtml(course.specialization_name || 'بدون تخصص')}</small>
+            <strong>${Number(course.file_count || 0)} ملف PDF</strong>
+          </span>
+          <span class="question-course-arrow">عرض الملفات ←</span>
+        </button>
+      </article>
+    `).join('');
+  } catch (error) {
+    grid.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function loadQuestionCourseFiles(courseId) {
+  const course = questionCoursesById.get(courseId);
+  const grid = $('#questionCourseGrid');
+  const panel = $('#questionFilesPanel');
+  const list = $('#questionFilesList');
+  if (!course || !panel || !list) return;
+
+  grid.classList.add('hidden');
+  panel.classList.remove('hidden');
+  $('#questionSelectedCourse').textContent = course.name;
+  list.innerHTML = '<div class="empty-state">جارٍ تحميل الملفات...</div>';
+
+  try {
+    const result = await api('/api/question-files/' + encodeURIComponent(courseId), {cache: 'no-store'});
+    const items = Array.isArray(result.items) ? result.items : [];
+    if (!items.length) {
+      list.innerHTML = '<div class="empty-state">لم تتم إضافة ملفات أسئلة لهذه المادة بعد.</div>';
+      return;
+    }
+    list.innerHTML = items.map(file => `
+      <article class="question-file-card">
+        <span class="question-file-icon">PDF</span>
+        <div class="question-file-info">
+          <b>${escapeHtml(file.title)}</b>
+          <small>${escapeHtml(file.file_name || 'ملف PDF')} · ${formatQuestionFileSize(file.file_size)}</small>
+        </div>
+        <div class="question-file-actions">
+          <button type="button" class="btn btn-outline" data-open-question-file="${escapeHtml(file.id)}">فتح الملف</button>
+          <button type="button" class="btn btn-primary" data-download-question-file="${escapeHtml(file.id)}" data-file-name="${escapeHtml(file.file_name || 'questions.pdf')}">تحميل</button>
+        </div>
+      </article>
+    `).join('');
+  } catch (error) {
+    list.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function formatQuestionFileSize(value) {
+  const size = Number(value || 0);
+  return size < 1024 * 1024
+    ? Math.max(1, Math.round(size / 1024)) + ' KB'
+    : (size / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+async function transferQuestionPdf(fileId, download, fileName) {
+  const popup = download ? null : window.open('about:blank', '_blank');
+  if (!download && !popup) {
+    toast('اسمح بفتح النوافذ المنبثقة لعرض ملف PDF.');
+    return;
+  }
+  try {
+    const response = await fetch(
+      API_BASE + '/api/question-file/' + encodeURIComponent(fileId) + (download ? '?download=1' : ''),
+      {method: 'GET', credentials: 'include', cache: 'no-store'}
+    );
+    if (!response.ok) {
+      let data = {};
+      try { data = await response.json(); } catch {}
+      throw new Error(data.error || 'تعذر تحميل ملف PDF.');
+    }
+    const blobUrl = URL.createObjectURL(await response.blob());
+    if (download) {
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName || 'questions.pdf';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } else {
+      popup.opener = null;
+      popup.location.href = blobUrl;
+    }
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+  } catch (error) {
+    if (popup) popup.close();
+    toast(error.message || 'تعذر فتح الملف.');
+  }
+}
+
+$('#questionCourseGrid')?.addEventListener('click', event => {
+  const button = event.target.closest('[data-question-course]');
+  if (button) loadQuestionCourseFiles(button.dataset.questionCourse);
+});
+
+$('#backQuestionCourses')?.addEventListener('click', () => {
+  $('#questionFilesPanel')?.classList.add('hidden');
+  $('#questionCourseGrid')?.classList.remove('hidden');
+});
+
+$('#questionFilesList')?.addEventListener('click', event => {
+  const openButton = event.target.closest('[data-open-question-file]');
+  const downloadButton = event.target.closest('[data-download-question-file]');
+  if (openButton) transferQuestionPdf(openButton.dataset.openQuestionFile, false, '');
+  if (downloadButton) transferQuestionPdf(
+    downloadButton.dataset.downloadQuestionFile, true, downloadButton.dataset.fileName
+  );
+});
 
 async function loadSpecializations() {
   try {

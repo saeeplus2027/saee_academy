@@ -98,6 +98,7 @@ async function loadAll() {
   await loadSpecializations();
   await Promise.all([loadRequests(), loadCourses(), loadUsers(), loadSiteContent()]);
   await loadVideos();
+  await loadAdminQuestionFiles();
 }
 
 async function loadSpecializations() {
@@ -115,6 +116,14 @@ async function loadSpecializations() {
       renderVideoCourseOptions();
     }
     renderAdminSpecializations();
+    if ($('#questionFileSpecialization')) {
+      const previousQuestionSpec = $('#questionFileSpecialization').value;
+      $('#questionFileSpecialization').innerHTML = options;
+      if (adminSpecializations.some(item => item.id === previousQuestionSpec)) {
+        $('#questionFileSpecialization').value = previousQuestionSpec;
+      }
+    }
+    renderQuestionFileCourseOptions();
   } catch (error) {
     $('#adminSpecializationsList').textContent = error.message;
     toast(error.message);
@@ -212,6 +221,7 @@ async function loadCourses() {
     const result = await api('/api/admin/courses');
     adminCourses = result.items || [];
     renderVideoCourseOptions();
+    renderQuestionFileCourseOptions();
     renderAdminCourses();
     await loadVideos();
   } catch (error) {
@@ -290,12 +300,13 @@ $('#adminCoursesList').addEventListener('click', async event => {
     } catch (error) { toast(error.message); }
   }
   if (deleteId) {
-    if (!confirm('سيتم حذف المادة وطلبات الاشتراك وفيديوهاتها من التخزين. هل تريد المتابعة؟')) return;
+    if (!confirm('سيتم حذف المادة وطلبات الاشتراك وفيديوهاتها وملفات PDF التابعة لها. هل تريد المتابعة؟')) return;
     try {
       await api('/api/admin/courses/' + encodeURIComponent(deleteId), {method: 'DELETE'});
       toast('تم حذف المادة وملفات فيديوهاتها.');
       await loadCourses();
       await loadRequests();
+      await loadAdminQuestionFiles();
     } catch (error) { toast(error.message); }
   }
 });
@@ -413,6 +424,127 @@ $('#videoForm').addEventListener('submit', async event => {
     await loadCourses();
   } catch (error) {
     message('#videoMessage', error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+
+function renderQuestionFileCourseOptions() {
+  const specialization = $('#questionFileSpecialization');
+  const courseSelect = $('#questionFileCourse');
+  if (!specialization || !courseSelect) return;
+  const selectedSpecialization = specialization.value;
+  const previousCourse = courseSelect.value;
+  const filtered = adminCourses.filter(course =>
+    !selectedSpecialization || course.specialization_id === selectedSpecialization
+  );
+  courseSelect.innerHTML = '<option value="">اختر المادة</option>' + filtered.map(course =>
+    `<option value="${esc(course.id)}">${esc(course.name)}</option>`
+  ).join('');
+  if (filtered.some(course => course.id === previousCourse)) courseSelect.value = previousCourse;
+  if (!filtered.length) courseSelect.innerHTML = '<option value="">لا توجد مواد لهذا التخصص</option>';
+}
+
+async function loadAdminQuestionFiles() {
+  const target = $('#adminQuestionFilesList');
+  if (!target) return;
+  try {
+    const result = await api('/api/admin/question-files', {cache: 'no-store'});
+    const items = Array.isArray(result.items) ? result.items : [];
+    if (!items.length) {
+      target.innerHTML = '<div class="empty-state">لم تتم إضافة ملفات PDF بعد.</div>';
+      return;
+    }
+    target.innerHTML = items.map(file => `
+      <article class="management-card question-admin-file-row">
+        <div>
+          <b>${esc(file.title)}</b>
+          <small>${esc(file.specialization_name)} · ${esc(file.course_name)} · ${esc(file.file_name)} · ${formatAdminQuestionFileSize(file.file_size)}</small>
+        </div>
+        <button type="button" class="btn btn-small btn-delete" data-delete-question-file="${esc(file.id)}">حذف الملف</button>
+      </article>
+    `).join('');
+  } catch (error) {
+    target.textContent = error.message;
+  }
+}
+
+function formatAdminQuestionFileSize(value) {
+  const size = Number(value || 0);
+  return size < 1024 * 1024
+    ? Math.max(1, Math.round(size / 1024)) + ' KB'
+    : (size / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function adminBase64Url(value) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/g, '');
+}
+
+$('#questionFileSpecialization')?.addEventListener('change', renderQuestionFileCourseOptions);
+$('#refreshQuestionFiles')?.addEventListener('click', loadAdminQuestionFiles);
+
+$('#adminQuestionFilesList')?.addEventListener('click', async event => {
+  const button = event.target.closest('[data-delete-question-file]');
+  if (!button || !confirm('هل تريد حذف ملف الأسئلة هذا نهائياً؟')) return;
+  button.disabled = true;
+  try {
+    await api('/api/admin/question-files/item/' + encodeURIComponent(button.dataset.deleteQuestionFile), {
+      method: 'DELETE'
+    });
+    toast('تم حذف ملف الأسئلة.');
+    await loadAdminQuestionFiles();
+  } catch (error) {
+    toast(error.message);
+    button.disabled = false;
+  }
+});
+
+$('#questionFileForm')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const file = form.get('file');
+  const title = String(form.get('title') || '').trim();
+  const courseId = String(form.get('course_id') || '');
+  if (!courseId || !title || !file || !file.size) {
+    message('#questionFileMessage', 'اختر التخصص والمادة واكتب عنوان الملف وحدد ملف PDF.');
+    return;
+  }
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    message('#questionFileMessage', 'يسمح برفع ملفات PDF فقط.');
+    return;
+  }
+  if (file.size > 50 * 1024 * 1024) {
+    message('#questionFileMessage', 'حجم الملف يتجاوز الحد الأقصى (50 ميغابايت).');
+    return;
+  }
+
+  const button = event.currentTarget.querySelector('button');
+  button.disabled = true;
+  message('#questionFileMessage', 'جارٍ رفع ملف PDF...');
+  try {
+    const uploadUrl = new URL(API_BASE + '/api/admin/question-files/' + encodeURIComponent(courseId));
+    uploadUrl.searchParams.set('title_b64', adminBase64Url(title));
+    uploadUrl.searchParams.set('filename_b64', adminBase64Url(file.name));
+    const response = await fetch(uploadUrl.toString(), {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'content-type': 'application/pdf'},
+      body: file
+    });
+    let data = {};
+    try { data = await response.json(); } catch {}
+    if (!response.ok) throw new Error(data.error || 'تعذر رفع ملف PDF.');
+    message('#questionFileMessage', 'تم رفع ملف PDF وإضافته إلى المادة بنجاح.');
+    toast('تمت إضافة ملف الأسئلة.');
+    event.currentTarget.reset();
+    renderQuestionFileCourseOptions();
+    await loadAdminQuestionFiles();
+  } catch (error) {
+    message('#questionFileMessage', error.message);
   } finally {
     button.disabled = false;
   }

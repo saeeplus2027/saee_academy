@@ -1,7 +1,6 @@
 Repository: saeeplus2027/saee_academy
 Branch: main
-Latest main inspected: 2405be1681c94deb4e2b1780eb5072c80800c32a
-Public build source commit: 15f1e7d052241eba3adcc0492174b6e517af57a8
-Successful GitHub Pages run: 46063678314
-The only later commit difference is README_AR.txt; public files and src/entry.py matched the Pages build base.
-The public folder in this package is a verified snapshot of that Pages artifact, plus only the question-library changes.
+Source archive commit recorded in uploaded ZIP: d166338aec175ab3cd4a3c122719069c2506ddde
+The project files were read from the ZIP supplied by the project owner and modified in-place for the PDF question library.
+Integrated feature files include the student page, site navigation, admin UI, front-end handlers, and Cloudflare Worker API/storage handlers.
+No claim is made that these files have been pushed to GitHub or deployed to GitHub Pages/Cloudflare.

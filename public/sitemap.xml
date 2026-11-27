@@ -10,4 +10,7 @@
   <url><loc>https://YOUR-DOMAIN.com/terms.html</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
   <url><loc>https://YOUR-DOMAIN.com/refund-policy.html</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
   <url><loc>https://YOUR-DOMAIN.com/contact.html</loc><changefreq>monthly</changefreq><priority>0.4</priority></url>
+  <url>
+    <loc>https://saeeplus2027.github.io/saee_academy/questions.html</loc>
+  </url>
 </urlset>

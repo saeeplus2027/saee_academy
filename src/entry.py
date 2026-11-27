@@ -1,6 +1,6 @@
 import json, re, secrets, hashlib, hmac, time, base64
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlsplit, unquote, parse_qs
+from urllib.parse import urlsplit, unquote, parse_qs, quote
 from workers import WorkerEntrypoint, Response
 
 # Cloudflare Python Workers run on Pyodide, where hashlib.pbkdf2_hmac may
@@ -200,6 +200,20 @@ class Default(WorkerEntrypoint):
             "content_key TEXT PRIMARY KEY,"
             "content_value TEXT NOT NULL DEFAULT '',"
             "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        ).run()
+
+    async def ensure_question_files_table(self):
+        """Create PDF metadata storage lazily when the feature is first used."""
+        await self.env.DB.prepare(
+            "CREATE TABLE IF NOT EXISTS question_files ("
+            "id TEXT PRIMARY KEY,course_id TEXT NOT NULL,title TEXT NOT NULL,"
+            "file_name TEXT NOT NULL,file_size INTEGER NOT NULL,"
+            "object_key TEXT NOT NULL UNIQUE,created_by TEXT,"
+            "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        ).run()
+        await self.env.DB.prepare(
+            "CREATE INDEX IF NOT EXISTS idx_question_files_course "
+            "ON question_files(course_id,created_at DESC)"
         ).run()
 
     async def api(self, request, path, method):
@@ -587,6 +601,59 @@ class Default(WorkerEntrypoint):
                 {"error": "يجب تسجيل الدخول أولاً."}, 401
             )
 
+        # Student PDF library. These endpoints are inside the existing session-authenticated
+        # section; no paid-course enrollment is required for these user-uploaded files.
+        if path == "/api/question-files" and method == "GET":
+            await self.ensure_question_files_table()
+            rows = await self.env.DB.prepare(
+                "SELECT c.id,c.name,c.specialization_id,s.name AS specialization_name,"
+                "COUNT(qf.id) AS file_count FROM courses c "
+                "JOIN specializations s ON s.id=c.specialization_id "
+                "LEFT JOIN question_files qf ON qf.course_id=c.id "
+                "WHERE c.is_published=1 "
+                "GROUP BY c.id,c.name,c.specialization_id,s.name ORDER BY s.name,c.name"
+            ).all()
+            return json_response({"items": rows.results})
+
+        if path.startswith("/api/question-files/") and method == "GET":
+            await self.ensure_question_files_table()
+            course_id = path.rsplit("/", 1)[-1]
+            course = await self.env.DB.prepare(
+                "SELECT id FROM courses WHERE id=? AND is_published=1"
+            ).bind(course_id).first()
+            if not course:
+                return json_response({"error": "المادة غير موجودة أو غير منشورة."}, 404)
+            rows = await self.env.DB.prepare(
+                "SELECT id,course_id,title,file_name,file_size,created_at "
+                "FROM question_files WHERE course_id=? ORDER BY created_at DESC"
+            ).bind(course_id).all()
+            return json_response({"items": rows.results})
+
+        if path.startswith("/api/question-file/") and method == "GET":
+            await self.ensure_question_files_table()
+            file_id = path.rsplit("/", 1)[-1]
+            row = await self.env.DB.prepare(
+                "SELECT q.object_key,q.file_name FROM question_files q "
+                "JOIN courses c ON c.id=q.course_id "
+                "WHERE q.id=? AND c.is_published=1"
+            ).bind(file_id).first()
+            if not row:
+                return json_response({"error": "ملف الأسئلة غير موجود."}, 404)
+            obj = await self.env.MEDIA.get(row["object_key"])
+            if not obj:
+                return json_response({"error": "ملف PDF غير موجود في التخزين."}, 404)
+            query = parse_qs(urlsplit(request.url).query)
+            download = query.get("download", ["0"])[0] == "1"
+            disposition = "attachment" if download else "inline"
+            safe_name = (row["file_name"] or "questions.pdf").replace('"', "")
+            disposition += "; filename=questions.pdf; filename*=UTF-8''" + quote(safe_name, safe="")
+            return Response(obj.body, headers={
+                "content-type": "application/pdf",
+                "content-disposition": disposition,
+                "cache-control": "private, no-store",
+                "x-content-type-options": "nosniff",
+            })
+
         if path == "/api/specializations" and method == "GET":
             rows = await self.env.DB.prepare(
                 "SELECT s.id,s.name,s.description,COUNT(c.id) AS course_count "
@@ -775,6 +842,98 @@ class Default(WorkerEntrypoint):
         return json_response({"error": "المسار غير موجود."}, 404)
 
     async def admin_api(self, request, path, method):
+        # Admin-only PDF library operations. api() only calls admin_api after require_admin.
+        if path == "/api/admin/question-files" and method == "GET":
+            await self.ensure_question_files_table()
+            rows = await self.env.DB.prepare(
+                "SELECT q.id,q.course_id,q.title,q.file_name,q.file_size,q.created_at,"
+                "c.name AS course_name,s.name AS specialization_name "
+                "FROM question_files q JOIN courses c ON c.id=q.course_id "
+                "JOIN specializations s ON s.id=c.specialization_id ORDER BY q.created_at DESC"
+            ).all()
+            return json_response({"items": rows.results})
+
+        if path.startswith("/api/admin/question-files/item/") and method == "DELETE":
+            await self.ensure_question_files_table()
+            file_id = path.rsplit("/", 1)[-1]
+            row = await self.env.DB.prepare(
+                "SELECT object_key FROM question_files WHERE id=?"
+            ).bind(file_id).first()
+            if not row:
+                return json_response({"error": "ملف الأسئلة غير موجود."}, 404)
+            try:
+                await self.env.MEDIA.delete(row["object_key"])
+            except Exception as exc:
+                print("[SAEE_QUESTION_R2_DELETE_WARNING]", type(exc).__name__, str(exc))
+                return json_response({"error": "تعذر حذف الملف من التخزين. لم يتم حذف سجل الملف."}, 502)
+            await self.env.DB.prepare(
+                "DELETE FROM question_files WHERE id=?"
+            ).bind(file_id).run()
+            return json_response({"ok": True})
+
+        if path.startswith("/api/admin/question-files/") and method == "POST":
+            await self.ensure_question_files_table()
+            course_id = path.rsplit("/", 1)[-1]
+            course = await self.env.DB.prepare(
+                "SELECT id FROM courses WHERE id=?"
+            ).bind(course_id).first()
+            if not course:
+                return json_response({"error": "المادة المحددة غير موجودة."}, 404)
+
+            query = parse_qs(urlsplit(request.url).query)
+            title, file_name = "", ""
+            for key, target in (("title_b64", "title"), ("filename_b64", "file_name")):
+                values = query.get(key, [])
+                if not values:
+                    continue
+                try:
+                    token = values[0].replace("-", "+").replace("_", "/")
+                    token += "=" * (-len(token) % 4)
+                    decoded = base64.b64decode(token, validate=True).decode("utf-8")
+                except Exception:
+                    decoded = ""
+                if target == "title":
+                    title = safe_text(decoded, 140)
+                else:
+                    file_name = safe_text(decoded.replace("\\", "/").rsplit("/", 1)[-1], 180)
+
+            if not title or not file_name or not file_name.lower().endswith(".pdf"):
+                return json_response({"error": "أدخل عنوان الملف واختر ملف PDF صالحاً."}, 400)
+
+            raw = await request.bytes()
+            if len(raw) > 50 * 1024 * 1024:
+                return json_response({"error": "حجم ملف PDF يتجاوز 50 ميغابايت."}, 413)
+            if len(raw) < 5 or raw[:5] != b"%PDF-":
+                return json_response({"error": "الملف المحدد ليس ملف PDF صالحاً."}, 415)
+
+            file_id = secrets.token_urlsafe(16)
+            object_key = f"question-files/{course_id}/{file_id}.pdf"
+            try:
+                await self.env.MEDIA.put(
+                    object_key, raw, httpMetadata={"contentType": "application/pdf"}
+                )
+            except Exception as exc:
+                print("[SAEE_QUESTION_R2_UPLOAD_ERROR]", type(exc).__name__, str(exc))
+                return json_response({"error": "تعذر تخزين ملف PDF. حاول مرة أخرى."}, 502)
+
+            try:
+                current_admin = await self.current_user(request)
+                await self.env.DB.prepare(
+                    "INSERT INTO question_files "
+                    "(id,course_id,title,file_name,file_size,object_key,created_by) VALUES(?,?,?,?,?,?,?)"
+                ).bind(
+                    file_id, course_id, title, file_name, len(raw), object_key, current_admin["id"]
+                ).run()
+            except Exception as exc:
+                print("[SAEE_QUESTION_D1_INSERT_ERROR]", type(exc).__name__, str(exc))
+                try:
+                    await self.env.MEDIA.delete(object_key)
+                except Exception as cleanup_exc:
+                    print("[SAEE_QUESTION_R2_CLEANUP_WARNING]", type(cleanup_exc).__name__, str(cleanup_exc))
+                return json_response({"error": "فشل حفظ بيانات الملف. لم تتم إضافته إلى المكتبة."}, 500)
+
+            return json_response({"ok": True, "id": file_id}, 201)
+
         # Editable homepage text. Only known keys are accepted.
         if path == "/api/admin/site-content" and method == "PUT":
             # Do not rely solely on the GitHub Actions migration step: it may
@@ -896,6 +1055,18 @@ class Default(WorkerEntrypoint):
             video_rows = await self.env.DB.prepare(
                 "SELECT object_key FROM videos WHERE course_id=?"
             ).bind(cid).all()
+            await self.ensure_question_files_table()
+            question_rows = await self.env.DB.prepare(
+                "SELECT object_key FROM question_files WHERE course_id=?"
+            ).bind(cid).all()
+            for question_file in question_rows.results:
+                try:
+                    await self.env.MEDIA.delete(question_file["object_key"])
+                except Exception as exc:
+                    print("[SAEE_QUESTION_R2_COURSE_DELETE_WARNING]", type(exc).__name__, str(exc))
+            await self.env.DB.prepare(
+                "DELETE FROM question_files WHERE course_id=?"
+            ).bind(cid).run()
             for video in video_rows.results:
                 try:
                     await self.env.MEDIA.delete(video["object_key"])

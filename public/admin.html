@@ -8,7 +8,7 @@
   <title>سعي أكاديمي | Saee Academy</title>
   <link rel="icon" type="image/jpeg" href="https://cdn.phototourl.com/member/2026-11-27-1dc072ef-e4f9-4750-bcd8-c4b3b6d887d5.jpg">
   <link rel="apple-touch-icon" href="https://cdn.phototourl.com/member/2026-11-27-1dc072ef-e4f9-4750-bcd8-c4b3b6d887d5.jpg">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=question-library1">
   <link rel="stylesheet" href="admin.css">
 </head>
 <body class="admin-body">
@@ -29,12 +29,13 @@
     </div>
   </section>
   <section id="adminDashboard" class="hidden">
-    <div class="admin-heading"><div><span class="eyebrow">إدارة المنصة</span><h1>لوحة التحكم</h1><p>إدارة الطلبات والمواد والتخصصات والفيديوهات والمستخدمين ونصوص الموقع.</p></div></div>
+    <div class="admin-heading"><div><span class="eyebrow">إدارة المنصة</span><h1>لوحة التحكم</h1><p>إدارة الطلبات والمواد والتخصصات والفيديوهات ومكتبة الأسئلة والمستخدمين ونصوص الموقع.</p></div></div>
     <div class="admin-tabs">
       <button class="active" data-tab="requests">طلبات الاشتراك</button>
       <button data-tab="courses">المواد</button>
       <button data-tab="specializations">التخصصات</button>
       <button data-tab="videos">الفيديوهات</button>
+      <button data-tab="question-files">مكتبة الأسئلة</button>
       <button data-tab="users">المستخدمون</button>
       <button data-tab="site">محتوى الموقع</button>
     </div>
@@ -84,7 +85,22 @@
       <div id="adminVideosList" class="management-list">اختر مادة لعرض فيديوهاتها.</div>
     </section>
 
-    <section id="tab-users" class="admin-panel hidden">
+<section id="tab-question-files" class="admin-panel hidden">
+      <h2>إدارة مكتبة الأسئلة</h2>
+      <p class="muted">ارفع ملفات الأسئلة والامتحانات بصيغة PDF، وحدد التخصص والمادة التي تخصها. الحد الأقصى لحجم الملف 50 ميغابايت.</p>
+      <form id="questionFileForm" class="admin-form">
+        <label>التخصص<select id="questionFileSpecialization" required></select></label>
+        <label>المادة<select name="course_id" id="questionFileCourse" required></select></label>
+        <label>عنوان الملف<input name="title" required maxlength="140" placeholder="مثلاً: ميد 2025 أو فاينل 2024"></label>
+        <label class="wide">ملف الأسئلة PDF<input name="file" type="file" accept=".pdf,application/pdf" required></label>
+        <button class="btn btn-primary">رفع ملف PDF</button>
+        <div id="questionFileMessage" class="form-error wide"></div>
+      </form>
+      <div class="panel-title section-panel-title"><h2>الملفات المضافة</h2><button id="refreshQuestionFiles" class="btn btn-outline">تحديث</button></div>
+      <div id="adminQuestionFilesList" class="management-list">جارٍ تحميل الملفات...</div>
+    </section>
+
+        <section id="tab-users" class="admin-panel hidden">
       <div class="panel-title"><h2>إدارة المستخدمين</h2><button id="refreshUsers" class="btn btn-outline">تحديث</button></div>
       <p class="muted">يمكن تعطيل حساب طالب أو إعادة تفعيله أو حذفه نهائياً. لا يمكن حذف آخر حساب أدمن.</p>
       <div id="adminUsersList" class="management-list">جارٍ التحميل...</div>
@@ -129,5 +145,5 @@
   </section>
 </main>
 <div id="adminToast" class="toast"></div>
-<script src="config.js"></script><script src="admin.js?v=20261127-cliq-contact1"></script>
+<script src="config.js"></script><script src="admin.js?v=question-library1"></script>
 </body></html>
