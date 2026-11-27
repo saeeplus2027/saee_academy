@@ -441,7 +441,7 @@ class Default(WorkerEntrypoint):
                 headers={
                     "set-cookie": (
                         f"saee_session={token}; HttpOnly; Secure; "
-                        f"SameSite=None; Path=/; Max-Age={SESSION_DAYS * 86400}"
+                        f"SameSite=None; Partitioned; Path=/; Max-Age={SESSION_DAYS * 86400}"
                     )
                 },
             )
@@ -487,7 +487,7 @@ class Default(WorkerEntrypoint):
                 headers={
                     "set-cookie": (
                         f"saee_session={token}; HttpOnly; Secure; "
-                        f"SameSite=None; Path=/; Max-Age={SESSION_DAYS * 86400}"
+                        f"SameSite=None; Partitioned; Path=/; Max-Age={SESSION_DAYS * 86400}"
                     )
                 },
             )
@@ -504,7 +504,7 @@ class Default(WorkerEntrypoint):
                 headers={
                     "set-cookie": (
                         "saee_session=; HttpOnly; Secure; "
-                        "SameSite=None; Path=/; Max-Age=0"
+                        "SameSite=None; Partitioned; Path=/; Max-Age=0"
                     )
                 },
             )
@@ -609,7 +609,7 @@ class Default(WorkerEntrypoint):
             ).bind(user["id"]).run()
             return json_response(
                 {"ok": True, "message": "تم حذف الحساب نهائياً."},
-                headers={"set-cookie": "saee_session=; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=0"}
+                headers={"set-cookie": "saee_session=; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=0"}
             )
 
         user = await self.current_user(request)
