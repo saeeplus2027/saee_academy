@@ -1,6 +1,6 @@
 import json, re, secrets, hashlib, hmac, time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, unquote
 from workers import WorkerEntrypoint, Response
 
 # Cloudflare Python Workers run on Pyodide, where hashlib.pbkdf2_hmac may
@@ -991,7 +991,7 @@ class Default(WorkerEntrypoint):
                 )
 
             title = safe_text(
-                request.headers.get("x-video-title", ""), 140
+                unquote(request.headers.get("x-video-title", "")), 140
             )
             content_type = request.headers.get(
                 "content-type", "application/octet-stream"

@@ -389,7 +389,7 @@ $('#videoForm').addEventListener('submit', async event => {
   try {
     const response = await fetch(API_BASE + '/api/admin/videos/' + encodeURIComponent(form.get('course_id')), {
       method: 'POST', credentials: 'include',
-      headers: {'content-type': file.type || 'video/mp4', 'x-video-title': form.get('title')},
+      headers: {'content-type': file.type || 'video/mp4', 'x-video-title': encodeURIComponent(String(form.get('title') || '').trim())},
       body: file
     });
     let data = {};
