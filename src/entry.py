@@ -862,12 +862,49 @@ class Default(WorkerEntrypoint):
                     403,
                 )
 
-            obj = await self.env.MEDIA.get(access["object_key"])
+            # Support byte-range requests used by HTML5 video players.
+            # Without 206/Content-Range, some browsers show a black player or
+            # cannot seek within MP4 files.
+            range_header = request.headers.get("range", "")
+            range_match = re.fullmatch(r"bytes=(\\d*)-(\\d*)", range_header.strip())
+            get_options = None
+            status = 200
+            extra_headers = {"accept-ranges": "bytes"}
+            if range_match:
+                start_text, end_text = range_match.groups()
+                size_row = await self.env.MEDIA.head(access["object_key"])
+                if not size_row:
+                    return json_response({"error": "الفيديو غير موجود."}, 404)
+                total_size = size_row.size
+                if start_text:
+                    start = int(start_text)
+                    end = int(end_text) if end_text else total_size - 1
+                elif end_text:
+                    suffix_length = int(end_text)
+                    start = max(0, total_size - suffix_length)
+                    end = total_size - 1
+                else:
+                    start, end = 0, total_size - 1
+                if start >= total_size or end < start:
+                    return Response("", status=416, headers={
+                        "content-range": f"bytes */{total_size}",
+                        "accept-ranges": "bytes",
+                    })
+                end = min(end, total_size - 1)
+                get_options = {"range": {"offset": start, "length": end - start + 1}}
+                status = 206
+                extra_headers.update({
+                    "content-range": f"bytes {start}-{end}/{total_size}",
+                    "content-length": str(end - start + 1),
+                })
+
+            obj = await self.env.MEDIA.get(access["object_key"], get_options) if get_options else await self.env.MEDIA.get(access["object_key"])
             if not obj:
                 return json_response({"error": "الفيديو غير موجود."}, 404)
 
             return Response(
                 obj.body,
+                status=status,
                 headers={
                     "content-type": (
                         obj.httpMetadata.contentType or "video/mp4"
@@ -875,6 +912,7 @@ class Default(WorkerEntrypoint):
                     "cache-control": "private, no-store",
                     "content-disposition": "inline",
                     "x-content-type-options": "nosniff",
+                    **extra_headers,
                 },
             )
 
