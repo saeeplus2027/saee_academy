@@ -3,7 +3,21 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 from workers import WorkerEntrypoint, Response
 
-PBKDF2_ROUNDS = 310000
+# Cloudflare Python Workers run on Pyodide, where hashlib.pbkdf2_hmac may
+# be unavailable. Use the Workers Web Crypto implementation there; retain
+# the standard-library fallback for ordinary local CPython execution.
+try:
+    from js import crypto, Uint8Array, Object, Array
+    from pyodide.ffi import to_js
+except ImportError:  # pragma: no cover - used only outside Python Workers
+    crypto = None
+    Uint8Array = None
+    Object = None
+    Array = None
+    to_js = None
+
+# Cloudflare Workers Web Crypto rejects PBKDF2 iterations above 100,000.
+PBKDF2_ROUNDS = 100000
 SESSION_DAYS = 14
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
@@ -19,10 +33,47 @@ def json_response(data, status=200, headers=None):
     return Response.json(data, status=status, headers=h)
 
 
-def password_hash(password, salt):
-    return hashlib.pbkdf2_hmac(
-        "sha256", password.encode(), salt.encode(), PBKDF2_ROUNDS
-    ).hex()
+async def password_hash(password, salt):
+    """Return PBKDF2-HMAC-SHA256(password, salt, 100000, 32 bytes) as hex.
+
+    Workers use Web Crypto because Pyodide's hashlib build does not expose
+    pbkdf2_hmac. The algorithm, iteration count, salt encoding, and output
+    length match hashlib.pbkdf2_hmac so hashes remain interoperable.
+    """
+    password_bytes = password.encode("utf-8")
+    salt_bytes = salt.encode("utf-8")
+
+    if crypto is None or Uint8Array is None:
+        return hashlib.pbkdf2_hmac(
+            "sha256", password_bytes, salt_bytes, PBKDF2_ROUNDS, dklen=32
+        ).hex()
+
+    password_data = Uint8Array.new(to_js(list(password_bytes)))
+    salt_data = Uint8Array.new(to_js(list(salt_bytes)))
+    key_usages = Array.new()
+    key_usages.push("deriveBits")
+    key = await crypto.subtle.importKey(
+        "raw",
+        password_data,
+        to_js({"name": "PBKDF2"}, dict_converter=Object.fromEntries),
+        False,
+        key_usages,
+    )
+    derived = await crypto.subtle.deriveBits(
+        to_js(
+            {
+                "name": "PBKDF2",
+                "salt": salt_data,
+                "iterations": PBKDF2_ROUNDS,
+                "hash": "SHA-256",
+            },
+            dict_converter=Object.fromEntries,
+        ),
+        key,
+        256,
+    )
+    output = Uint8Array.new(derived)
+    return "".join(format(int(output[i]), "02x") for i in range(output.length))
 
 
 def token_digest(token):
@@ -130,6 +181,15 @@ class Default(WorkerEntrypoint):
         if path == "/api/health" and method == "GET":
             return json_response({"ok": True, "service": "saee-academy"})
 
+        # Public, read-only site copy. The table is created by migration 0002.
+        if path == "/api/site-content" and method == "GET":
+            rows = await self.env.DB.prepare(
+                "SELECT content_key,content_value FROM site_content"
+            ).all()
+            return json_response({
+                "items": {row["content_key"]: row["content_value"] for row in rows.results}
+            })
+
         if path == "/api/admin/bootstrap" and method == "POST":
             # Run once after setting ADMIN_BOOTSTRAP_KEY as a Worker secret.
             supplied = request.headers.get("x-bootstrap-key", "")
@@ -177,7 +237,7 @@ class Default(WorkerEntrypoint):
                     "(id,full_name,email,password_hash,password_salt,role) "
                     "VALUES(?,?,?,?,?,'admin')"
                 ).bind(
-                    uid, name, email, password_hash(password, salt), salt
+                    uid, name, email, await password_hash(password, salt), salt
                 ).run()
             except Exception:
                 return json_response(
@@ -246,13 +306,24 @@ class Default(WorkerEntrypoint):
             salt = secrets.token_hex(16)
             uid = secrets.token_urlsafe(18)
             try:
+                pw_hash = await password_hash(password, salt)
+            except Exception as exc:
+                print("[SAEE_REGISTER_HASH_ERROR]", type(exc).__name__, str(exc))
+                return json_response(
+                    {
+                        "error": (
+                            "تعذر تشفير كلمة المرور. لم يتم إنشاء الحساب. "
+                            "(SAEE_REGISTER_HASH_ERROR)"
+                        )
+                    },
+                    500,
+                )
+            try:
                 await self.env.DB.prepare(
                     "INSERT INTO users"
                     "(id,full_name,email,password_hash,password_salt) "
                     "VALUES(?,?,?,?,?)"
-                ).bind(
-                    uid, name, email, password_hash(password, salt), salt
-                ).run()
+                ).bind(uid, name, email, pw_hash, salt).run()
             except Exception as exc:
                 # Handle a possible concurrent registration safely, then log
                 # the actual database error for diagnosis in Worker Logs.
@@ -306,7 +377,7 @@ class Default(WorkerEntrypoint):
             ).bind(email).first()
 
             candidate = (
-                password_hash(password, row["password_salt"])
+                await password_hash(password, row["password_salt"])
                 if row and isinstance(password, str)
                 else ""
             )
@@ -375,6 +446,92 @@ class Default(WorkerEntrypoint):
                 }
             )
 
+        # Current-user settings: change display name and/or password.
+        if path == "/api/account" and method == "PUT":
+            user = await self.current_user(request)
+            if not user:
+                return json_response({"error": "يجب تسجيل الدخول أولاً."}, 401)
+            body = await parse_body(request)
+            current_password = body.get("current_password", "")
+            if not isinstance(current_password, str) or not current_password:
+                return json_response({"error": "أدخل كلمة المرور الحالية لتأكيد التعديل."}, 400)
+
+            credential = await self.env.DB.prepare(
+                "SELECT password_hash,password_salt FROM users WHERE id=?"
+            ).bind(user["id"]).first()
+            candidate = await password_hash(current_password, credential["password_salt"])
+            if not hmac.compare_digest(candidate, credential["password_hash"]):
+                return json_response({"error": "كلمة المرور الحالية غير صحيحة."}, 401)
+
+            full_name = safe_text(body.get("full_name"), 100) or user["full_name"]
+            if len(full_name) < 2:
+                return json_response({"error": "الاسم يجب أن يتكون من حرفين على الأقل."}, 400)
+
+            new_password = body.get("new_password", "")
+            if new_password:
+                if not isinstance(new_password, str) or len(new_password) < 10 or len(new_password) > 128:
+                    return json_response({"error": "كلمة المرور الجديدة يجب أن تكون بين 10 و128 حرفاً."}, 400)
+                new_salt = secrets.token_hex(16)
+                new_hash = await password_hash(new_password, new_salt)
+                await self.env.DB.prepare(
+                    "UPDATE users SET full_name=?,password_hash=?,password_salt=? WHERE id=?"
+                ).bind(full_name, new_hash, new_salt, user["id"]).run()
+                # Revoke other sessions after changing a password, then refresh the
+                # current session expiry by preserving its current token.
+                current_token = cookie_value(request, "saee_session")
+                await self.env.DB.prepare(
+                    "DELETE FROM sessions WHERE user_id=? AND token_hash<>?"
+                ).bind(user["id"], token_digest(current_token)).run()
+            else:
+                await self.env.DB.prepare(
+                    "UPDATE users SET full_name=? WHERE id=?"
+                ).bind(full_name, user["id"]).run()
+
+            updated = await self.env.DB.prepare(
+                "SELECT id,full_name,email,role FROM users WHERE id=?"
+            ).bind(user["id"]).first()
+            return json_response({"ok": True, "user": updated})
+
+        # Permanent account deletion. Verify the password and clean dependent rows.
+        if path == "/api/account" and method == "DELETE":
+            user = await self.current_user(request)
+            if not user:
+                return json_response({"error": "يجب تسجيل الدخول أولاً."}, 401)
+            body = await parse_body(request)
+            current_password = body.get("current_password", "")
+            if not isinstance(current_password, str) or not current_password:
+                return json_response({"error": "أدخل كلمة المرور لتأكيد حذف الحساب."}, 400)
+
+            credential = await self.env.DB.prepare(
+                "SELECT password_hash,password_salt FROM users WHERE id=?"
+            ).bind(user["id"]).first()
+            candidate = await password_hash(current_password, credential["password_salt"])
+            if not hmac.compare_digest(candidate, credential["password_hash"]):
+                return json_response({"error": "كلمة المرور غير صحيحة."}, 401)
+
+            if user["role"] == "admin":
+                admins = await self.env.DB.prepare(
+                    "SELECT COUNT(*) AS n FROM users WHERE role='admin' AND is_active=1"
+                ).first()
+                if admins and admins["n"] <= 1:
+                    return json_response({
+                        "error": "لا يمكن حذف آخر حساب أدمن. أنشئ أدمن آخر أولاً."
+                    }, 409)
+
+            await self.env.DB.prepare(
+                "DELETE FROM enrollment_requests WHERE student_id=?"
+            ).bind(user["id"]).run()
+            await self.env.DB.prepare(
+                "DELETE FROM sessions WHERE user_id=?"
+            ).bind(user["id"]).run()
+            await self.env.DB.prepare(
+                "DELETE FROM users WHERE id=?"
+            ).bind(user["id"]).run()
+            return json_response(
+                {"ok": True, "message": "تم حذف الحساب نهائياً."},
+                headers={"set-cookie": "saee_session=; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=0"}
+            )
+
         user = await self.current_user(request)
         if not user:
             return json_response(
@@ -396,7 +553,9 @@ class Default(WorkerEntrypoint):
                 "c.price_jod,c.cover_key,s.id AS specialization_id,"
                 "s.name AS specialization_name,"
                 "(SELECT COUNT(*) FROM videos v WHERE v.course_id=c.id) "
-                "AS video_count "
+                "AS video_count,"
+                "(SELECT COUNT(DISTINCT e.student_id) FROM enrollment_requests e "
+                "WHERE e.course_id=c.id AND e.status IN ('pending','approved')) AS enrollment_count "
                 "FROM courses c JOIN specializations s "
                 "ON s.id=c.specialization_id "
                 "WHERE c.is_published=1 ORDER BY c.created_at DESC"
@@ -497,6 +656,195 @@ class Default(WorkerEntrypoint):
         return json_response({"error": "المسار غير موجود."}, 404)
 
     async def admin_api(self, request, path, method):
+        # Editable homepage text. Only known keys are accepted.
+        if path == "/api/admin/site-content" and method == "PUT":
+            allowed_keys = {
+                "site_title", "brand_name", "logo_url", "favicon_url",
+                "hero_eyebrow", "hero_title", "hero_emphasis", "hero_description",
+                "how_eyebrow", "how_title", "how_description",
+                "step_1_title", "step_1_text", "step_2_title", "step_2_text",
+                "step_3_title", "step_3_text",
+                "cta_title", "cta_description", "cta_button",
+                "home_feature_1_title", "home_feature_1_text",
+                "home_feature_2_title", "home_feature_2_text",
+                "home_feature_3_title", "home_feature_3_text",
+                "footer_text"
+            }
+            body = await parse_body(request)
+            saved = 0
+            for key, value in body.items():
+                if key not in allowed_keys or not isinstance(value, str):
+                    continue
+                value = value.strip()[:1000]
+                await self.env.DB.prepare(
+                    "INSERT INTO site_content(content_key,content_value,updated_at) "
+                    "VALUES(?,?,CURRENT_TIMESTAMP) "
+                    "ON CONFLICT(content_key) DO UPDATE SET "
+                    "content_value=excluded.content_value,updated_at=CURRENT_TIMESTAMP"
+                ).bind(key, value).run()
+                saved += 1
+            return json_response({"ok": True, "saved": saved})
+
+        if path == "/api/admin/courses" and method == "GET":
+            rows = await self.env.DB.prepare(
+                "SELECT c.id,c.name,c.instructor_name,c.description,c.price_jod,"
+                "c.cover_key,c.is_published,c.specialization_id,"
+                "s.name AS specialization_name,"
+                "(SELECT COUNT(*) FROM videos v WHERE v.course_id=c.id) AS video_count,"
+                "(SELECT COUNT(DISTINCT e.student_id) FROM enrollment_requests e "
+                "WHERE e.course_id=c.id AND e.status IN ('pending','approved')) AS enrollment_count "
+                "FROM courses c JOIN specializations s ON s.id=c.specialization_id "
+                "ORDER BY c.created_at DESC"
+            ).all()
+            return json_response({"items": rows.results})
+
+        if path == "/api/admin/specializations" and method == "GET":
+            rows = await self.env.DB.prepare(
+                "SELECT s.id,s.name,s.description,"
+                "(SELECT COUNT(*) FROM courses c WHERE c.specialization_id=s.id) AS course_count "
+                "FROM specializations s ORDER BY s.name"
+            ).all()
+            return json_response({"items": rows.results})
+
+        if path.startswith("/api/admin/specializations/") and method == "PUT":
+            sid = path.rsplit("/", 1)[-1]
+            body = await parse_body(request)
+            name = safe_text(body.get("name"), 100)
+            description = safe_text(body.get("description"), 500)
+            if len(name) < 2:
+                return json_response({"error": "اسم التخصص مطلوب."}, 400)
+            try:
+                result = await self.env.DB.prepare(
+                    "UPDATE specializations SET name=?,description=? WHERE id=?"
+                ).bind(name, description, sid).run()
+            except Exception:
+                return json_response({"error": "اسم التخصص مستخدم بالفعل."}, 409)
+            return json_response({"ok": True})
+
+        if path.startswith("/api/admin/specializations/") and method == "DELETE":
+            sid = path.rsplit("/", 1)[-1]
+            linked = await self.env.DB.prepare(
+                "SELECT COUNT(*) AS n FROM courses WHERE specialization_id=?"
+            ).bind(sid).first()
+            if linked and linked["n"]:
+                return json_response(
+                    {"error": "لا يمكن حذف التخصص قبل حذف المواد التابعة له."}, 409
+                )
+            await self.env.DB.prepare(
+                "DELETE FROM specializations WHERE id=?"
+            ).bind(sid).run()
+            return json_response({"ok": True})
+
+        if path.startswith("/api/admin/courses/") and method == "PUT":
+            cid = path.rsplit("/", 1)[-1]
+            body = await parse_body(request)
+            name = safe_text(body.get("name"), 120)
+            instructor = safe_text(body.get("instructor_name"), 100)
+            sid = safe_text(body.get("specialization_id"), 80)
+            description = safe_text(body.get("description"), 1000)
+            try:
+                price = float(body.get("price_jod"))
+            except Exception:
+                price = -1
+            if len(name) < 2 or len(instructor) < 2 or price < 0 or price > 10000:
+                return json_response({"error": "تحقق من بيانات المادة والسعر."}, 400)
+            spec = await self.env.DB.prepare(
+                "SELECT id FROM specializations WHERE id=?"
+            ).bind(sid).first()
+            if not spec:
+                return json_response({"error": "التخصص المحدد غير موجود."}, 400)
+            await self.env.DB.prepare(
+                "UPDATE courses SET specialization_id=?,name=?,instructor_name=?,"
+                "description=?,price_jod=?,is_published=? WHERE id=?"
+            ).bind(
+                sid, name, instructor, description, price,
+                1 if body.get("is_published") else 0, cid
+            ).run()
+            return json_response({"ok": True})
+
+        if path.startswith("/api/admin/courses/") and method == "DELETE":
+            cid = path.rsplit("/", 1)[-1]
+            video_rows = await self.env.DB.prepare(
+                "SELECT object_key FROM videos WHERE course_id=?"
+            ).bind(cid).all()
+            for video in video_rows.results:
+                try:
+                    await self.env.MEDIA.delete(video["object_key"])
+                except Exception as exc:
+                    print("[SAEE_ADMIN_R2_DELETE_WARNING]", type(exc).__name__, str(exc))
+            await self.env.DB.prepare(
+                "DELETE FROM enrollment_requests WHERE course_id=?"
+            ).bind(cid).run()
+            await self.env.DB.prepare(
+                "DELETE FROM videos WHERE course_id=?"
+            ).bind(cid).run()
+            await self.env.DB.prepare(
+                "DELETE FROM courses WHERE id=?"
+            ).bind(cid).run()
+            return json_response({"ok": True})
+
+        if path.startswith("/api/admin/videos/item/") and method == "DELETE":
+            vid = path.rsplit("/", 1)[-1]
+            row = await self.env.DB.prepare(
+                "SELECT object_key FROM videos WHERE id=?"
+            ).bind(vid).first()
+            if not row:
+                return json_response({"error": "الفيديو غير موجود."}, 404)
+            try:
+                await self.env.MEDIA.delete(row["object_key"])
+            except Exception as exc:
+                print("[SAEE_ADMIN_VIDEO_DELETE_WARNING]", type(exc).__name__, str(exc))
+            await self.env.DB.prepare("DELETE FROM videos WHERE id=?").bind(vid).run()
+            return json_response({"ok": True})
+
+        if path.startswith("/api/admin/videos/") and method == "GET":
+            course_id = path.rsplit("/", 1)[-1]
+            rows = await self.env.DB.prepare(
+                "SELECT id,course_id,title,position,created_at FROM videos "
+                "WHERE course_id=? ORDER BY position"
+            ).bind(course_id).all()
+            return json_response({"items": rows.results})
+
+        if path == "/api/admin/users" and method == "GET":
+            rows = await self.env.DB.prepare(
+                "SELECT id,full_name,email,role,created_at,is_active FROM users "
+                "ORDER BY created_at DESC"
+            ).all()
+            return json_response({"items": rows.results})
+
+        if path.startswith("/api/admin/users/") and method == "PUT":
+            uid = path.rsplit("/", 1)[-1]
+            body = await parse_body(request)
+            active = 1 if body.get("is_active") else 0
+            if uid == (await self.current_user(request))["id"] and not active:
+                return json_response({"error": "لا يمكنك تعطيل حسابك الحالي من هذه الصفحة."}, 400)
+            await self.env.DB.prepare(
+                "UPDATE users SET is_active=? WHERE id=?"
+            ).bind(active, uid).run()
+            if not active:
+                await self.env.DB.prepare(
+                    "DELETE FROM sessions WHERE user_id=?"
+                ).bind(uid).run()
+            return json_response({"ok": True})
+
+        if path.startswith("/api/admin/users/") and method == "DELETE":
+            uid = path.rsplit("/", 1)[-1]
+            target = await self.env.DB.prepare(
+                "SELECT id,role FROM users WHERE id=?"
+            ).bind(uid).first()
+            if not target:
+                return json_response({"error": "المستخدم غير موجود."}, 404)
+            if target["role"] == "admin":
+                admins = await self.env.DB.prepare(
+                    "SELECT COUNT(*) AS n FROM users WHERE role='admin'"
+                ).first()
+                if admins and admins["n"] <= 1:
+                    return json_response({"error": "لا يمكن حذف آخر حساب أدمن."}, 409)
+            await self.env.DB.prepare("DELETE FROM enrollment_requests WHERE student_id=?").bind(uid).run()
+            await self.env.DB.prepare("DELETE FROM sessions WHERE user_id=?").bind(uid).run()
+            await self.env.DB.prepare("DELETE FROM users WHERE id=?").bind(uid).run()
+            return json_response({"ok": True})
+
         if path == "/api/admin/specializations" and method == "POST":
             body = await parse_body(request)
             name = safe_text(body.get("name"), 100)
@@ -606,7 +954,10 @@ class Default(WorkerEntrypoint):
                 key, raw, httpMetadata={"contentType": content_type}
             )
 
-            position = (count["n"] if count else 0) + 1
+            last_position = await self.env.DB.prepare(
+                "SELECT COALESCE(MAX(position),0) AS n FROM videos WHERE course_id=?"
+            ).bind(course_id).first()
+            position = (last_position["n"] if last_position else 0) + 1
             await self.env.DB.prepare(
                 "INSERT INTO videos"
                 "(id,course_id,title,object_key,position) VALUES(?,?,?,?,?)"

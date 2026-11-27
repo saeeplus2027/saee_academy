@@ -1,1 +1,29 @@
 .admin-body{min-height:100vh}.admin-main{max-width:1120px;margin:45px auto;padding:0 20px}.admin-heading{margin-bottom:25px}.admin-heading h1{font-size:28px;margin:14px 0 5px}.admin-heading p,.muted{color:var(--muted);font-size:12px}.admin-login{min-height:65vh;display:grid;place-items:center}.admin-panel{background:#fff;border:1px solid var(--line);border-radius:19px;padding:28px;margin-bottom:20px;box-shadow:0 10px 35px #34457c08}.admin-login .admin-panel{width:min(100%,440px);padding:36px}.admin-panel h1{font-size:23px}.admin-panel h2{font-size:18px;margin:0 0 20px}.admin-panel>p{color:var(--muted);font-size:12px;line-height:1.9}.admin-panel form{display:grid;gap:14px;margin-top:22px}.admin-panel label{display:grid;gap:7px;font-size:11px;color:#66718a}.admin-panel input,.admin-panel select,.admin-panel textarea{width:100%;border:1px solid #e4e8f2;border-radius:10px;padding:12px;background:#fff;outline:0}.admin-panel input:focus,.admin-panel select:focus,.admin-panel textarea:focus{border-color:#7882ed}.admin-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}.admin-tabs button{border:1px solid var(--line);background:#fff;padding:12px 18px;border-radius:11px;color:#66718a;cursor:pointer}.admin-tabs button.active{background:#5967e9;color:white;border-color:#5967e9}.admin-form{grid-template-columns:repeat(2,minmax(0,1fr))!important}.admin-form .wide{grid-column:1/-1}.admin-form .check-label{display:flex;align-items:center;gap:8px}.admin-form .check-label input{width:auto}.panel-title{display:flex;justify-content:space-between;align-items:center}.request-item{display:grid;grid-template-columns:1fr auto;gap:15px;padding:18px 0;border-top:1px solid var(--line);align-items:center}.request-item h3{font-size:14px;margin:0 0 6px}.request-item p{font-size:11px;color:var(--muted);margin:0;line-height:1.9}.request-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.request-actions input{width:90px;padding:9px;border:1px solid var(--line);border-radius:9px}.btn-small{padding:9px 12px;font-size:10px;border-radius:9px}.btn-accept{background:#e7f8f3;color:#15977f}.btn-reject{background:#fff0f1;color:#cf5d6b}.status{font-size:10px;padding:6px 10px;border-radius:20px;background:#fff5df;color:#b38327}.status.approved{background:#e7f8f3;color:#15977f}.status.rejected{background:#fff0f1;color:#cf5d6b}.simple-list{margin-top:20px;display:flex;gap:8px;flex-wrap:wrap}.simple-list span{background:#f2f4ff;padding:9px 13px;border-radius:10px;font-size:11px;color:#5967d8}@media(max-width:650px){.admin-form{grid-template-columns:1fr!important}.request-item{grid-template-columns:1fr}.request-actions{justify-content:flex-start}.admin-main{margin-top:25px}}
+
+
+.section-panel-title{margin-top:30px;padding-top:20px;border-top:1px solid var(--line)}
+.management-list{display:grid;gap:12px;margin-top:18px}
+.management-card{background:#fbfcff;border:1px solid var(--line);border-radius:14px;padding:17px}
+.management-card-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.management-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.management-fields label{display:grid;gap:6px;font-size:10px;color:var(--muted)}
+.management-fields input,.management-fields select,.management-fields textarea{width:100%;border:1px solid #e4e8f2;border-radius:9px;padding:10px;background:#fff;font:inherit;font-size:11px;color:var(--ink)}
+.management-fields .field-wide{grid-column:1/-1}
+.management-fields .inline-check{display:flex;align-items:center;gap:8px}
+.management-fields .inline-check input{width:auto}
+.management-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:13px}
+.management-meta{font-size:10px;color:var(--muted)}
+.btn-save{background:#e9f8f4;color:#168c78}
+.btn-delete{background:#fff0f1;color:#c45260}
+.user-row,.video-row{display:flex;justify-content:space-between;align-items:center;gap:15px}
+.user-row>div:first-child,.video-row>div:first-child{display:grid;gap:6px}
+.user-row small,.video-row small{font-size:10px;color:var(--muted);direction:ltr;text-align:right}
+.video-row .btn{flex-shrink:0}
+.course-management-card{padding:20px}
+.admin-panel .management-card .status{white-space:nowrap}
+@media(max-width:650px){
+  .management-fields{grid-template-columns:1fr}
+  .management-fields .field-wide{grid-column:auto}
+  .management-card-heading,.user-row,.video-row{align-items:flex-start;flex-direction:column}
+  .management-actions{width:100%}
+}
