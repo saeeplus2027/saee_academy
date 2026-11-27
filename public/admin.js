@@ -317,10 +317,10 @@ async function loadRequests() {
         ${request.expires_at ? ' · ينتهي: ' + new Date(request.expires_at).toLocaleDateString('ar-JO') : ''}</p></div>
         <div class="request-actions">
           <span class="status ${esc(request.status)}">${({pending:'قيد المراجعة',approved:'مقبول',rejected:'مرفوض',expired:'منتهي'})[request.status] || esc(request.status)}</span>
-          ${request.status === 'pending' ? `<input type="number" min="1" max="3650" value="30" aria-label="مدة الاشتراك بالأيام"><button class="btn btn-small btn-accept">قبول</button><button class="btn btn-small btn-reject">رفض</button>` : ''}
+          ${request.status === 'pending' ? `<small class="subscription-duration">مدة الاشتراك بعد القبول: 4 أشهر</small><button class="btn btn-small btn-accept">قبول الاشتراك</button><button class="btn btn-small btn-reject">رفض</button>` : ''}
         </div>`;
       if (request.status === 'pending') {
-        card.querySelector('.btn-accept').addEventListener('click', () => decideRequest(request.id, 'approve', Number(card.querySelector('input').value)));
+        card.querySelector('.btn-accept').addEventListener('click', () => decideRequest(request.id, 'approve'));
         card.querySelector('.btn-reject').addEventListener('click', () => decideRequest(request.id, 'reject'));
       }
       target.append(card);
@@ -330,12 +330,12 @@ async function loadRequests() {
   }
 }
 
-async function decideRequest(id, action, days = 30) {
+async function decideRequest(id, action) {
   try {
     await api('/api/admin/requests/' + encodeURIComponent(id), {
-      method: 'POST', body: JSON.stringify({action, duration_days: days})
+      method: 'POST', body: JSON.stringify({action})
     });
-    toast(action === 'approve' ? 'تم قبول الطلب وتفعيل الاشتراك.' : 'تم رفض الطلب.');
+    toast(action === 'approve' ? 'تم قبول الطلب وتفعيل الاشتراك لمدة 4 أشهر.' : 'تم رفض الطلب.');
     await loadRequests();
     await loadCourses();
   } catch (error) { toast(error.message); }
@@ -387,9 +387,13 @@ $('#videoForm').addEventListener('submit', async event => {
   button.disabled = true;
   message('#videoMessage', '');
   try {
-    const response = await fetch(API_BASE + '/api/admin/videos/' + encodeURIComponent(form.get('course_id')), {
+    const videoTitle = String(form.get('title') || '').trim();
+    const uploadUrl = new URL(API_BASE + '/api/admin/videos/' + encodeURIComponent(form.get('course_id')));
+    uploadUrl.searchParams.set('title', videoTitle);
+    const mimeType = /^video\/[A-Za-z0-9.+-]+$/.test(file.type) ? file.type : 'video/mp4';
+    const response = await fetch(uploadUrl.toString(), {
       method: 'POST', credentials: 'include',
-      headers: {'content-type': file.type || 'video/mp4', 'x-video-title': encodeURIComponent(String(form.get('title') || '').trim())},
+      headers: {'content-type': mimeType},
       body: file
     });
     let data = {};

@@ -1,6 +1,6 @@
 import json, re, secrets, hashlib, hmac, time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlsplit, unquote
+from urllib.parse import urlsplit, unquote, parse_qs
 from workers import WorkerEntrypoint, Response
 
 # Cloudflare Python Workers run on Pyodide, where hashlib.pbkdf2_hmac may
@@ -990,12 +990,16 @@ class Default(WorkerEntrypoint):
                     {"error": "الحد الأقصى 30 فيديو للمادة."}, 400
                 )
 
-            title = safe_text(
-                unquote(request.headers.get("x-video-title", "")), 140
-            )
-            content_type = request.headers.get(
-                "content-type", "application/octet-stream"
-            )
+            # Video titles are supplied in the URL query string, not an HTTP
+            # header. HTTP header values are restricted to Latin-1 and Arabic
+            # titles can otherwise make the browser reject RequestInit before
+            # the upload even reaches this Worker.
+            query = parse_qs(urlsplit(request.url).query)
+            title_values = query.get("title", [""])
+            title = safe_text(title_values[0], 140) if title_values else ""
+            content_type = request.headers.get("content-type", "application/octet-stream")
+            if not re.fullmatch(r"video/[A-Za-z0-9.+-]+", content_type):
+                content_type = "video/mp4"
 
             if not title or not content_type.startswith("video/"):
                 return json_response(
@@ -1047,24 +1051,16 @@ class Default(WorkerEntrypoint):
                 return json_response({"error": "إجراء غير صالح."}, 400)
 
             if action == "approve":
-                try:
-                    days = int(body.get("duration_days", 30))
-                except Exception:
-                    days = 0
-
-                if days < 1 or days > 3650:
-                    return json_response(
-                        {
-                            "error": (
-                                "مدة الاشتراك يجب أن تكون بين يوم "
-                                "و3650 يوماً."
-                            )
-                        },
-                        400,
-                    )
-
-                expires = (
-                    datetime.now(timezone.utc) + timedelta(days=days)
+                # Every approved course subscription lasts four calendar
+                # months from the approval date (not an approximate 120 days).
+                now = datetime.now(timezone.utc)
+                month_index = now.month - 1 + 4
+                target_year = now.year + month_index // 12
+                target_month = month_index % 12 + 1
+                import calendar
+                target_day = min(now.day, calendar.monthrange(target_year, target_month)[1])
+                expires = now.replace(
+                    year=target_year, month=target_month, day=target_day
                 ).isoformat()
 
                 await self.env.DB.prepare(
