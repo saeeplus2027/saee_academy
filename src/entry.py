@@ -1020,8 +1020,18 @@ class Default(WorkerEntrypoint):
                     {"error": "أرسل ملف فيديو وعنواناً صالحاً."}, 400
                 )
 
-            raw = await request.arrayBuffer()
-            if len(raw) > 500 * 1024 * 1024:
+            # Stream the upload straight into R2 instead of buffering the
+            # whole file in Worker memory (Workers have a ~128MB memory cap,
+            # and the Python Request wrapper has no arrayBuffer() method).
+            try:
+                length = int(request.headers.get("content-length", "0") or 0)
+            except ValueError:
+                length = 0
+            if length <= 0:
+                return json_response(
+                    {"error": "ملف الفيديو فارغ أو حجمه غير معروف."}, 400
+                )
+            if length > 500 * 1024 * 1024:
                 return json_response(
                     {"error": "حجم الفيديو يتجاوز 500 ميغابايت."}, 413
                 )
@@ -1030,7 +1040,12 @@ class Default(WorkerEntrypoint):
             key = f"courses/{course_id}/{vid}"
 
             await self.env.MEDIA.put(
-                key, raw, httpMetadata={"contentType": content_type}
+                key,
+                request.js_object.body,
+                to_js(
+                    {"httpMetadata": {"contentType": content_type}},
+                    dict_converter=Object.fromEntries,
+                ),
             )
 
             last_position = await self.env.DB.prepare(
