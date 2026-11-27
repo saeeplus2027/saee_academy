@@ -193,6 +193,15 @@ class Default(WorkerEntrypoint):
         user = await self.current_user(request)
         return user if user and user["role"] == "admin" else None
 
+    async def ensure_site_content_table(self):
+        """Create editable homepage content storage if its D1 migration was not applied."""
+        await self.env.DB.prepare(
+            "CREATE TABLE IF NOT EXISTS site_content ("
+            "content_key TEXT PRIMARY KEY,"
+            "content_value TEXT NOT NULL DEFAULT '',"
+            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        ).run()
+
     async def api(self, request, path, method):
         # Health-check endpoint.
         if path == "/api/health" and method == "GET":
@@ -200,6 +209,7 @@ class Default(WorkerEntrypoint):
 
         # Public, read-only site copy. The table is created by migration 0002.
         if path == "/api/site-content" and method == "GET":
+            await self.ensure_site_content_table()
             rows = await self.env.DB.prepare(
                 "SELECT content_key,content_value FROM site_content"
             ).all()
@@ -767,6 +777,9 @@ class Default(WorkerEntrypoint):
     async def admin_api(self, request, path, method):
         # Editable homepage text. Only known keys are accepted.
         if path == "/api/admin/site-content" and method == "PUT":
+            # Do not rely solely on the GitHub Actions migration step: it may
+            # have failed previously because of a Cloudflare API-token issue.
+            await self.ensure_site_content_table()
             allowed_keys = {
                 "site_title", "brand_name", "logo_url", "favicon_url",
                 "subscription_contact_phone",

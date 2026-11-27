@@ -517,8 +517,11 @@ $('#siteContentForm').addEventListener('submit', async event => {
   message('#siteContentMessage', '');
   try {
     const result = await api('/api/admin/site-content', {method: 'PUT', body: JSON.stringify(data)});
-    message('#siteContentMessage', `تم حفظ ${result.saved} حقلاً. حدّث الموقع لرؤية التعديلات.`);
-    toast('تم تحديث محتوى الموقع.');
+    if (!result || result.ok !== true || Number(result.saved) < 1) {
+      throw new Error('لم يتم حفظ أي حقل. تحقق من البيانات ثم حاول مرة أخرى.');
+    }
+    message('#siteContentMessage', `تم حفظ محتوى الموقع بنجاح (${result.saved} حقلاً).`);
+    toast('تم حفظ محتوى الموقع بنجاح.');
   } catch (error) {
     message('#siteContentMessage', error.message);
   } finally {
