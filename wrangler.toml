@@ -22,3 +22,6 @@ bucket_name = "saee-academy-media"
 [vars]
 APP_NAME = "Saee Academy"
 COOKIE_SECURE = "true"
+[observability]
+enabled = true
+head_sampling_rate = 1
