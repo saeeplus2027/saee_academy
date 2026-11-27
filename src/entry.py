@@ -80,6 +80,13 @@ def token_digest(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def session_token(request):
+    authorization = request.headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return cookie_value(request, "saee_session")
+
+
 def cookie_value(request, name):
     raw = request.headers.get("cookie", "")
     for item in raw.split(";"):
@@ -123,7 +130,7 @@ class Default(WorkerEntrypoint):
                     "access-control-allow-origin": origin,
                     "access-control-allow-credentials": "true",
                     "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-                    "access-control-allow-headers": "content-type,x-video-title,x-bootstrap-key",
+                    "access-control-allow-headers": "content-type,authorization,x-video-title,x-bootstrap-key",
                     "access-control-max-age": "86400",
                     "vary": "Origin",
                 }
@@ -168,7 +175,7 @@ class Default(WorkerEntrypoint):
         ).run()
 
     async def current_user(self, request):
-        token = cookie_value(request, "saee_session")
+        token = session_token(request)
         if not token:
             return None
 
@@ -436,12 +443,12 @@ class Default(WorkerEntrypoint):
                     500,
                 )
             return json_response(
-                {"ok": True, "message": "تم إنشاء الحساب وتسجيل دخولك بنجاح."},
+                {"ok": True, "message": "تم إنشاء الحساب وتسجيل دخولك بنجاح.", "access_token": token},
                 201,
                 headers={
                     "set-cookie": (
                         f"saee_session={token}; HttpOnly; Secure; "
-                        f"SameSite=None; Partitioned; Path=/; Max-Age={SESSION_DAYS * 86400}"
+                        f"SameSite=None; Path=/; Max-Age={SESSION_DAYS * 86400}"
                     )
                 },
             )
@@ -483,17 +490,17 @@ class Default(WorkerEntrypoint):
             ).bind(token_digest(token), row["id"], expires).run()
 
             return json_response(
-                {"ok": True},
+                {"ok": True, "access_token": token},
                 headers={
                     "set-cookie": (
                         f"saee_session={token}; HttpOnly; Secure; "
-                        f"SameSite=None; Partitioned; Path=/; Max-Age={SESSION_DAYS * 86400}"
+                        f"SameSite=None; Path=/; Max-Age={SESSION_DAYS * 86400}"
                     )
                 },
             )
 
         if path == "/api/auth/logout" and method == "POST":
-            token = cookie_value(request, "saee_session")
+            token = session_token(request)
             if token:
                 await self.env.DB.prepare(
                     "DELETE FROM sessions WHERE token_hash=?"
@@ -504,7 +511,7 @@ class Default(WorkerEntrypoint):
                 headers={
                     "set-cookie": (
                         "saee_session=; HttpOnly; Secure; "
-                        "SameSite=None; Partitioned; Path=/; Max-Age=0"
+                        "SameSite=None; Path=/; Max-Age=0"
                     )
                 },
             )
@@ -558,7 +565,7 @@ class Default(WorkerEntrypoint):
                 ).bind(full_name, new_hash, new_salt, user["id"]).run()
                 # Revoke other sessions after changing a password, then refresh the
                 # current session expiry by preserving its current token.
-                current_token = cookie_value(request, "saee_session")
+                current_token = session_token(request)
                 await self.env.DB.prepare(
                     "DELETE FROM sessions WHERE user_id=? AND token_hash<>?"
                 ).bind(user["id"], token_digest(current_token)).run()
@@ -609,7 +616,7 @@ class Default(WorkerEntrypoint):
             ).bind(user["id"]).run()
             return json_response(
                 {"ok": True, "message": "تم حذف الحساب نهائياً."},
-                headers={"set-cookie": "saee_session=; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=0"}
+                headers={"set-cookie": "saee_session=; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=0"}
             )
 
         user = await self.current_user(request)
