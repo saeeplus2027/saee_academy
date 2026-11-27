@@ -498,7 +498,10 @@ class Default(WorkerEntrypoint):
             )
 
         if path == "/api/auth/logout" and method == "POST":
-            token = cookie_value(request, "saee_session")
+            authorization = request.headers.get("authorization", "")
+            token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+            if not token:
+                token = cookie_value(request, "saee_session")
             if token:
                 await self.env.DB.prepare(
                     "DELETE FROM sessions WHERE token_hash=?"

@@ -1,6 +1,7 @@
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const API_BASE = (window.SAEE_API_BASE || '').replace(/\/$/, '');
+const AUTH_TOKEN_KEY = 'saee_academy_session_token';
 let adminUser = null;
 let adminCourses = [];
 let adminSpecializations = [];
@@ -8,7 +9,9 @@ let selectedQuestionLibrarySubjectId = '';
 
 async function api(path, options = {}) {
   if (!API_BASE) throw new Error('إعداد عنوان الخادم غير موجود.');
+  const savedToken = localStorage.getItem(AUTH_TOKEN_KEY);
   const headers = {
+    ...(savedToken ? {authorization: `Bearer ${savedToken}`} : {}),
     ...(options.body && typeof options.body === 'string' ? {'content-type': 'application/json'} : {}),
     ...(options.headers || {})
   };
@@ -21,6 +24,7 @@ async function api(path, options = {}) {
   let data = {};
   try { data = await response.json(); } catch {}
   if (!response.ok) throw new Error(data.error || 'حدث خطأ غير متوقع.');
+  if (data.session_token) localStorage.setItem(AUTH_TOKEN_KEY, data.session_token);
   return data;
 }
 
@@ -86,6 +90,7 @@ $('#adminLoginForm').addEventListener('submit', async event => {
 
 $('#adminLogout').addEventListener('click', async () => {
   try { await api('/api/auth/logout', {method: 'POST'}); } catch {}
+  localStorage.removeItem(AUTH_TOKEN_KEY);
   location.href = 'index.html';
 });
 
