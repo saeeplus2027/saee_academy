@@ -652,7 +652,7 @@ class Default(WorkerEntrypoint):
 
         # Persist completion only for a video the student is currently
         # authorized to watch. The frontend calls this when playback ends.
-        if path.startswith("/api/watch/") and path.endswith("/complete") and method == "POST":
+        if path.startswith("/api/watch/") and path.endswith("/complete") and method in ("POST", "DELETE"):
             video_id = path.split("/")[-2]
             now = datetime.now(timezone.utc).isoformat()
             access = await self.env.DB.prepare(
@@ -663,8 +663,13 @@ class Default(WorkerEntrypoint):
             ).bind(video_id, user["id"], now).first()
             if not access:
                 return json_response(
-                    {"error": "لا تملك اشتراكاً فعالاً لمشاهدة هذا الفيديو."}, 403
+                    {"error": "لا تملك اشتراكاً فعالاً لهذه المادة."}, 403
                 )
+            if method == "DELETE":
+                await self.env.DB.prepare(
+                    "DELETE FROM video_progress WHERE user_id=? AND video_id=?"
+                ).bind(user["id"], video_id).run()
+                return json_response({"ok": True, "completed": False})
             await self.env.DB.prepare(
                 "INSERT INTO video_progress(user_id,video_id,completed_at) "
                 "VALUES(?,?,CURRENT_TIMESTAMP) "

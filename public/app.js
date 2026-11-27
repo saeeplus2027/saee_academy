@@ -485,25 +485,33 @@ function renderCourseVideoWorkspace() {
       ${courseVideos.map((video, index) => {
         const completed = Number(video.completed) === 1 || video.completed === true;
         return `
-          <button type="button" class="course-video-item ${video.id === activeVideoId ? 'active' : ''}" data-play-video="${escapeHtml(video.id)}">
-            <span class="course-video-number">${index + 1}</span>
-            <span class="course-video-title"><b>${escapeHtml(video.title)}</b><small>فيديو ${index + 1}</small></span>
-            <span class="video-completion ${completed ? 'done' : 'not-done'}">${completed ? '✓ مُنجز' : 'غير مُنجز'}</span>
-          </button>
+          <div class="course-video-item ${video.id === activeVideoId ? 'active' : ''}" data-video-row="${escapeHtml(video.id)}">
+            <button type="button" class="course-video-select" data-play-video="${escapeHtml(video.id)}">
+              <span class="course-video-number">${index + 1}</span>
+              <span class="course-video-title"><b>${escapeHtml(video.title)}</b><small>فيديو ${index + 1}</small></span>
+            </button>
+            <button type="button" class="video-completion-button ${completed ? 'done' : ''}" data-toggle-complete="${escapeHtml(video.id)}" aria-pressed="${completed ? 'true' : 'false'}">${completed ? '✓ منجز' : 'إنجاز'}</button>
+          </div>
         `;
       }).join('')}
     </div>
     <div class="course-video-player-panel">
       <div class="course-video-now" id="courseVideoNow">اختر فيديو لبدء المشاهدة</div>
-      <video id="courseVideoPlayer" class="course-video-player" controls playsinline crossorigin="use-credentials" preload="metadata"></video>
+      <video id="courseVideoPlayer" class="course-video-player" controls controlsList="nodownload" disablePictureInPicture playsinline crossorigin="use-credentials" preload="metadata"></video>
       <p id="courseVideoMessage" class="course-video-message" role="status">يُحتسب الفيديو مُنجزاً تلقائياً عند الوصول إلى نهايته.</p>
     </div>
   `;
 
-  $('#courseVideoList')?.addEventListener('click', event => {
+  $('#courseVideoList')?.addEventListener('click', async event => {
+    const completeButton = event.target.closest('[data-toggle-complete]');
+    if (completeButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      await toggleCourseVideoComplete(completeButton.dataset.toggleComplete);
+      return;
+    }
     const button = event.target.closest('[data-play-video]');
-    if (!button) return;
-    selectCourseVideo(button.dataset.playVideo, true);
+    if (button) selectCourseVideo(button.dataset.playVideo, true);
   });
 }
 
@@ -522,7 +530,10 @@ function selectCourseVideo(videoId, autoplay = true) {
     : 'شاهد الفيديو حتى نهايته ليُسجّل كفيديو مُنجز.';
   // The media is served from the Cloudflare Worker origin; send the session cookie.
   player.crossOrigin = 'use-credentials';
-  player.onended = () => markCourseVideoComplete(videoId);
+  player.onended = null;
+  player.setAttribute('controlsList', 'nodownload');
+  player.setAttribute('disablePictureInPicture', '');
+  player.oncontextmenu = event => event.preventDefault();
   player.onerror = () => {
     if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'تعذر تشغيل الفيديو. حدّث الصفحة أو تواصل مع الإدارة.';
   };
@@ -536,20 +547,26 @@ function selectCourseVideo(videoId, autoplay = true) {
   }
 }
 
-async function markCourseVideoComplete(videoId) {
+async function toggleCourseVideoComplete(videoId) {
   const video = courseVideos.find(item => item.id === videoId);
-  if (!video || Number(video.completed) === 1 || video.completed === true) return;
-  const message = $('#courseVideoMessage');
-  if (message) message.textContent = 'تم إنهاء الفيديو. جارٍ حفظ الإنجاز...';
+  if (!video) return;
+  const wasCompleted = Number(video.completed) === 1 || video.completed === true;
+  const button = $(`[data-toggle-complete="${CSS.escape(videoId)}"]`);
+  if (button) button.disabled = true;
   try {
-    await api(`/api/watch/${encodeURIComponent(videoId)}/complete`, {method: 'POST'});
-    video.completed = 1;
-    video.completed_at = new Date().toISOString();
+    await api(`/api/watch/${encodeURIComponent(videoId)}/complete`, {
+      method: wasCompleted ? 'DELETE' : 'POST'
+    });
+    video.completed = wasCompleted ? 0 : 1;
+    video.completed_at = wasCompleted ? null : new Date().toISOString();
     renderCourseVideoWorkspace();
-    selectCourseVideo(videoId, false);
-    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = '✓ تم تسجيل الفيديو كمُنجز في حسابك.';
-    toast('تم تسجيل إنجاز الفيديو.');
+    selectCourseVideo(activeVideoId, false);
+    const message = $('#courseVideoMessage');
+    if (message) message.textContent = wasCompleted ? 'تم إلغاء إنجاز الفيديو.' : '✓ تم تسجيل الفيديو كمنجز في حسابك.';
+    toast(wasCompleted ? 'تم إلغاء الإنجاز.' : 'تم تسجيل إنجاز الفيديو.');
   } catch (error) {
+    if (button) button.disabled = false;
+    const message = $('#courseVideoMessage');
     if (message) message.textContent = `لم يتم حفظ الإنجاز: ${error.message}`;
   }
 }

@@ -114,3 +114,12 @@
   .course-video-list{max-height:320px}
   .course-video-player{max-height:320px}
 }
+
+/* Per-video manual completion control */
+.course-video-item{cursor:default}
+.course-video-select{min-width:0;flex:1;display:flex;align-items:center;gap:10px;text-align:right;padding:0;border:0;background:transparent;color:inherit;cursor:pointer}
+.course-video-select:hover{background:transparent}
+.video-completion-button{flex:0 0 auto;border:1px solid #cbd2ff;border-radius:10px;padding:8px 12px;background:#f3f4ff;color:#5966dc;font:inherit;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap}
+.video-completion-button.done{border-color:#b8eadb;background:#e8f8f2;color:#13866f}
+.video-completion-button:disabled{opacity:.6;cursor:wait}
+.course-video-player::-webkit-media-controls-download-button{display:none!important}
