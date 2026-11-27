@@ -6,6 +6,7 @@ let currentUser = null;
 let courses = [];
 let specializations = [];
 let selectedCourse = null;
+let myEnrollments = new Map();
 
 if ($('#year')) $('#year').textContent = new Date().getFullYear();
 
@@ -43,6 +44,67 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[char]));
+}
+
+function setMyEnrollments(items = []) {
+  myEnrollments = new Map((Array.isArray(items) ? items : []).map(item => [item.course_id, item]));
+}
+
+function getEnrollmentState(courseId) {
+  const item = myEnrollments.get(courseId);
+  if (!item) return null;
+  if (item.status === 'approved' && item.expires_at) {
+    const expiry = Date.parse(item.expires_at);
+    if (Number.isFinite(expiry) && expiry <= Date.now()) return {...item, display_status: 'expired'};
+  }
+  return {...item, display_status: item.status};
+}
+
+function formatJordanDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('ar-JO', {dateStyle: 'medium'}).format(date);
+}
+
+function enrollmentStatusMarkup(courseId, compact = false) {
+  const item = getEnrollmentState(courseId);
+  if (!item) return '';
+  const status = item.display_status;
+  const labels = {
+    pending: 'طلبك قيد المراجعة',
+    approved: 'تم قبول اشتراكك',
+    rejected: 'تم رفض طلب الاشتراك',
+    expired: 'انتهى الاشتراك'
+  };
+  const classes = {pending: 'pending', approved: 'approved', rejected: 'rejected', expired: 'expired'};
+  const expiryText = status === 'approved' && item.expires_at
+    ? ` · صالح حتى ${formatJordanDate(item.expires_at)}`
+    : '';
+  return `<div class="enrollment-status ${classes[status] || ''}${compact ? ' compact' : ''}">${labels[status] || 'حالة الاشتراك غير معروفة'}${expiryText}</div>`;
+}
+
+function enrollmentActionMarkup(courseId) {
+  const item = getEnrollmentState(courseId);
+  const status = item?.display_status;
+  if (status === 'pending') {
+    return '<button class="btn btn-outline btn-lg" disabled>طلب الاشتراك قيد المراجعة</button>';
+  }
+  if (status === 'approved') {
+    return '<a class="btn btn-primary btn-lg" href="#courseContent">عرض محتوى المادة</a>';
+  }
+  if (status === 'rejected') {
+    return '<button id="courseEnrollButton" class="btn btn-primary btn-lg">إعادة طلب الاشتراك</button>';
+  }
+  if (status === 'expired') {
+    return '<button id="courseEnrollButton" class="btn btn-primary btn-lg">تجديد الاشتراك</button>';
+  }
+  return '<button id="courseEnrollButton" class="btn btn-primary btn-lg">طلب الاشتراك في المادة</button>';
+}
+
+async function refreshMyEnrollments() {
+  const result = await api('/api/my/enrollments', {cache: 'no-store'});
+  setMyEnrollments(result.items || []);
 }
 
 function openAuth(mode = 'login') {
@@ -275,10 +337,12 @@ function renderSpecializations() {
 async function loadCourses() {
   try {
     const [courseData, specData] = await Promise.all([
-      api('/api/courses'), api('/api/specializations')
+      api('/api/courses', {cache: 'no-store'}),
+      api('/api/specializations', {cache: 'no-store'})
     ]);
     courses = courseData.items || [];
     specializations = specData.items || [];
+    try { await refreshMyEnrollments(); } catch { setMyEnrollments([]); }
     const filter = $('#specializationFilter');
     if (filter) {
       filter.innerHTML = '<option value="">كل التخصصات</option>' + specializations.map(item =>
@@ -317,7 +381,8 @@ function renderCourses() {
         <span class="course-price">${Number(course.price_jod).toFixed(2)} د.أ</span>
       </div>
       <div class="enrollment-count">👥 ${Number(course.enrollment_count || 0)} مسجل</div>
-      <a class="btn btn-outline course-open" href="course.html?id=${encodeURIComponent(course.id)}">عرض صفحة المادة</a>
+      ${enrollmentStatusMarkup(course.id, true)}
+      <a class="btn btn-outline course-open" href="course.html?id=${encodeURIComponent(course.id)}">${getEnrollmentState(course.id)?.display_status === 'approved' ? 'عرض محتوى المادة' : 'عرض صفحة المادة'}</a>
     </article>
   `).join('');
 }
@@ -330,14 +395,20 @@ async function loadCourseDetail() {
     return;
   }
   try {
-    const data = await api('/api/courses');
+    const [data] = await Promise.all([
+      api('/api/courses', {cache: 'no-store'}),
+      refreshMyEnrollments()
+    ]);
     courses = data.items || [];
     selectedCourse = courses.find(item => item.id === courseId);
     if (!selectedCourse) {
       target.innerHTML = '<div class="empty-state">المادة غير موجودة أو غير منشورة.</div>';
       return;
     }
+
     const c = selectedCourse;
+    const enrollment = getEnrollmentState(c.id);
+    const isApproved = enrollment?.display_status === 'approved';
     target.innerHTML = `
       <div class="course-detail-card">
         <span class="tag">${escapeHtml(c.specialization_name)}</span>
@@ -349,14 +420,137 @@ async function loadCourseDetail() {
           <div><small>عدد المسجلين</small><b>${Number(c.enrollment_count || 0)}</b></div>
           <div><small>السعر</small><b>${Number(c.price_jod).toFixed(2)} د.أ</b></div>
         </div>
-        <button id="courseEnrollButton" class="btn btn-primary btn-lg">طلب الاشتراك في المادة</button>
-        <p id="courseEnrollMessage" class="form-error" role="status"></p>
+        ${isApproved ? `
+          <div class="enrollment-status approved">اشتراكك مقبول وفعّال${enrollment.expires_at ? ` · صالح حتى ${formatJordanDate(enrollment.expires_at)}` : ''}</div>
+          <a class="btn btn-primary btn-lg course-content-jump" href="#courseContent">عرض محتوى المادة</a>
+        ` : `
+          ${enrollmentStatusMarkup(c.id)}
+          ${enrollmentActionMarkup(c.id)}
+          <p id="courseEnrollMessage" class="form-error" role="status"></p>
+        `}
         <a class="text-link" href="courses.html">العودة إلى المواد</a>
       </div>
+      ${isApproved ? `
+        <section id="courseContent" class="course-content-section">
+          <div class="course-content-heading">
+            <div><span class="eyebrow">مكتبة المادة</span><h2>محتوى المادة</h2><p>شاهد الفيديو حتى نهايته ليُسجّل تلقائياً كفيديو مُنجز.</p></div>
+            <div id="videoProgressSummary" class="video-progress-summary">جارٍ تحميل الفيديوهات...</div>
+          </div>
+          <div id="courseVideoWorkspace" class="course-video-workspace"><div class="empty-state">جارٍ تحميل محتوى المادة...</div></div>
+        </section>
+      ` : ''}
     `;
-    $('#courseEnrollButton').addEventListener('click', requestEnrollment);
+    if (!isApproved) {
+      $('#courseEnrollButton')?.addEventListener('click', requestEnrollment);
+    } else {
+      await loadCourseVideos(c.id);
+    }
   } catch (error) {
     target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+let courseVideos = [];
+let activeVideoId = null;
+
+async function loadCourseVideos(courseId) {
+  const workspace = $('#courseVideoWorkspace');
+  if (!workspace) return;
+  try {
+    const result = await api(`/api/course-content/${encodeURIComponent(courseId)}`, {cache: 'no-store'});
+    courseVideos = result.items || [];
+    activeVideoId = courseVideos[0]?.id || null;
+    renderCourseVideoWorkspace();
+    if (activeVideoId) selectCourseVideo(activeVideoId, false);
+  } catch (error) {
+    workspace.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderCourseVideoWorkspace() {
+  const workspace = $('#courseVideoWorkspace');
+  if (!workspace) return;
+  const completedCount = courseVideos.filter(video => Number(video.completed) === 1 || video.completed === true).length;
+  const total = courseVideos.length;
+  const summary = $('#videoProgressSummary');
+  if (summary) summary.textContent = total ? `${completedCount} من ${total} فيديو مُنجز` : 'لا توجد فيديوهات بعد';
+
+  if (!total) {
+    workspace.innerHTML = '<div class="empty-state">لم تُضف فيديوهات لهذه المادة بعد. ستظهر هنا عند رفعها من لوحة الإدارة.</div>';
+    return;
+  }
+
+  workspace.innerHTML = `
+    <div class="course-video-list" id="courseVideoList">
+      ${courseVideos.map((video, index) => {
+        const completed = Number(video.completed) === 1 || video.completed === true;
+        return `
+          <button type="button" class="course-video-item ${video.id === activeVideoId ? 'active' : ''}" data-play-video="${escapeHtml(video.id)}">
+            <span class="course-video-number">${index + 1}</span>
+            <span class="course-video-title"><b>${escapeHtml(video.title)}</b><small>فيديو ${index + 1}</small></span>
+            <span class="video-completion ${completed ? 'done' : 'not-done'}">${completed ? '✓ مُنجز' : 'غير مُنجز'}</span>
+          </button>
+        `;
+      }).join('')}
+    </div>
+    <div class="course-video-player-panel">
+      <div class="course-video-now" id="courseVideoNow">اختر فيديو لبدء المشاهدة</div>
+      <video id="courseVideoPlayer" class="course-video-player" controls playsinline crossorigin="use-credentials" preload="metadata"></video>
+      <p id="courseVideoMessage" class="course-video-message" role="status">يُحتسب الفيديو مُنجزاً تلقائياً عند الوصول إلى نهايته.</p>
+    </div>
+  `;
+
+  $('#courseVideoList')?.addEventListener('click', event => {
+    const button = event.target.closest('[data-play-video]');
+    if (!button) return;
+    selectCourseVideo(button.dataset.playVideo, true);
+  });
+}
+
+function selectCourseVideo(videoId, autoplay = true) {
+  const video = courseVideos.find(item => item.id === videoId);
+  const player = $('#courseVideoPlayer');
+  if (!video || !player) return;
+  activeVideoId = videoId;
+  $$('#courseVideoList [data-play-video]').forEach(button => {
+    button.classList.toggle('active', button.dataset.playVideo === videoId);
+  });
+  $('#courseVideoNow').textContent = video.title;
+  const message = $('#courseVideoMessage');
+  message.textContent = (Number(video.completed) === 1 || video.completed === true)
+    ? '✓ هذا الفيديو مُنجز سابقاً.'
+    : 'شاهد الفيديو حتى نهايته ليُسجّل كفيديو مُنجز.';
+  // The media is served from the Cloudflare Worker origin; send the session cookie.
+  player.crossOrigin = 'use-credentials';
+  player.onended = () => markCourseVideoComplete(videoId);
+  player.onerror = () => {
+    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'تعذر تشغيل الفيديو. حدّث الصفحة أو تواصل مع الإدارة.';
+  };
+  player.src = `${API_BASE}/api/watch/${encodeURIComponent(videoId)}`;
+  player.load();
+  if (autoplay) {
+    const playPromise = player.play();
+    if (playPromise?.catch) playPromise.catch(() => {
+      if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'اضغط تشغيل لبدء الفيديو.';
+    });
+  }
+}
+
+async function markCourseVideoComplete(videoId) {
+  const video = courseVideos.find(item => item.id === videoId);
+  if (!video || Number(video.completed) === 1 || video.completed === true) return;
+  const message = $('#courseVideoMessage');
+  if (message) message.textContent = 'تم إنهاء الفيديو. جارٍ حفظ الإنجاز...';
+  try {
+    await api(`/api/watch/${encodeURIComponent(videoId)}/complete`, {method: 'POST'});
+    video.completed = 1;
+    video.completed_at = new Date().toISOString();
+    renderCourseVideoWorkspace();
+    selectCourseVideo(videoId, false);
+    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = '✓ تم تسجيل الفيديو كمُنجز في حسابك.';
+    toast('تم تسجيل إنجاز الفيديو.');
+  } catch (error) {
+    if (message) message.textContent = `لم يتم حفظ الإنجاز: ${error.message}`;
   }
 }
 
@@ -376,13 +570,44 @@ async function requestEnrollment() {
     const refreshedMessage = $('#courseEnrollMessage');
     if (refreshedMessage) refreshedMessage.textContent = result.message || 'تم إرسال طلب الاشتراك.';
   } catch (error) {
-    message.textContent = error.message;
+    // A request may already have been accepted by the admin on another page.
+    // Refresh the authoritative status before displaying a generic conflict.
+    try {
+      await loadCourseDetail();
+      const current = getEnrollmentState(selectedCourse.id);
+      if (current && ['pending', 'approved', 'expired', 'rejected'].includes(current.display_status)) {
+        message.textContent = current.display_status === 'approved'
+          ? 'تم قبول اشتراكك بالفعل.'
+          : current.display_status === 'pending'
+            ? 'طلبك ما زال قيد المراجعة.'
+            : error.message;
+      } else {
+        message.textContent = error.message;
+      }
+    } catch {
+      message.textContent = error.message;
+    }
   } finally {
     if ($('#courseEnrollButton')) $('#courseEnrollButton').disabled = false;
   }
 }
 
 function initializePage() {
+  // Refresh the student's server-side enrollment status periodically. When an
+  // admin approves a pending request, the course page switches to its videos.
+  window.setInterval(async () => {
+    if (!currentUser || document.visibilityState !== 'visible') return;
+    try {
+      const previous = JSON.stringify([...myEnrollments.entries()]);
+      await refreshMyEnrollments();
+      const changed = previous !== JSON.stringify([...myEnrollments.entries()]);
+      if (changed) {
+        if (page === 'courses') renderCourses();
+        if (page === 'course') await loadCourseDetail();
+      }
+    } catch {}
+  }, 30000);
+
   $('#specializationSearch')?.addEventListener('input', renderSpecializations);
   $('#courseSearch')?.addEventListener('input', renderCourses);
   $('#specializationFilter')?.addEventListener('change', renderCourses);

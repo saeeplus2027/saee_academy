@@ -607,6 +607,54 @@ class Default(WorkerEntrypoint):
             ).bind(user["id"]).all()
             return json_response({"items": rows.results})
 
+        # Return the video list only when the current user has an active,
+        # approved subscription for this course.
+        if path.startswith("/api/course-content/") and method == "GET":
+            course_id = path.rsplit("/", 1)[-1]
+            now = datetime.now(timezone.utc).isoformat()
+            enrollment = await self.env.DB.prepare(
+                "SELECT id FROM enrollment_requests "
+                "WHERE student_id=? AND course_id=? AND status='approved' "
+                "AND expires_at>? LIMIT 1"
+            ).bind(user["id"], course_id, now).first()
+            if not enrollment:
+                return json_response(
+                    {"error": "محتوى المادة متاح للمشتركين المقبولين فقط."}, 403
+                )
+
+            rows = await self.env.DB.prepare(
+                "SELECT v.id,v.title,v.position,"
+                "CASE WHEN p.video_id IS NULL THEN 0 ELSE 1 END AS completed,"
+                "p.completed_at "
+                "FROM videos v LEFT JOIN video_progress p "
+                "ON p.video_id=v.id AND p.user_id=? "
+                "WHERE v.course_id=? ORDER BY v.position"
+            ).bind(user["id"], course_id).all()
+            return json_response({"items": rows.results})
+
+        # Persist completion only for a video the student is currently
+        # authorized to watch. The frontend calls this when playback ends.
+        if path.startswith("/api/watch/") and path.endswith("/complete") and method == "POST":
+            video_id = path.split("/")[-2]
+            now = datetime.now(timezone.utc).isoformat()
+            access = await self.env.DB.prepare(
+                "SELECT v.id FROM videos v JOIN enrollment_requests e "
+                "ON e.course_id=v.course_id "
+                "WHERE v.id=? AND e.student_id=? AND e.status='approved' "
+                "AND e.expires_at>? LIMIT 1"
+            ).bind(video_id, user["id"], now).first()
+            if not access:
+                return json_response(
+                    {"error": "لا تملك اشتراكاً فعالاً لمشاهدة هذا الفيديو."}, 403
+                )
+            await self.env.DB.prepare(
+                "INSERT INTO video_progress(user_id,video_id,completed_at) "
+                "VALUES(?,?,CURRENT_TIMESTAMP) "
+                "ON CONFLICT(user_id,video_id) DO UPDATE SET "
+                "completed_at=CURRENT_TIMESTAMP"
+            ).bind(user["id"], video_id).run()
+            return json_response({"ok": True, "completed": True})
+
         if path.startswith("/api/watch/") and method == "GET":
             video_id = path.rsplit("/", 1)[-1]
             access = await self.env.DB.prepare(

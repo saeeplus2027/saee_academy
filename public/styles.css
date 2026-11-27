@@ -79,3 +79,38 @@
   .page-shell{padding:34px 16px 60px}
   .site-footer{align-items:flex-start}
 }
+
+
+/* Student enrollment state badges */
+.enrollment-status{display:block;width:fit-content;max-width:100%;margin-top:12px;padding:8px 12px;border-radius:10px;font-size:11px;line-height:1.7;background:#fff5df;color:#a8791f}.enrollment-status.pending{background:#fff5df;color:#a8791f}.enrollment-status.approved{background:#e7f8f3;color:#13866f}.enrollment-status.rejected{background:#fff0f1;color:#bf4f60}.enrollment-status.expired{background:#f0f2f7;color:#69738d}.enrollment-status.compact{font-size:10px;padding:7px 9px}.course-detail-card .enrollment-status{margin:18px 0 12px}
+
+
+/* Approved course content and persistent video completion */
+.course-content-jump{margin-top:14px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+.course-content-section{margin-top:28px;padding:26px;border:1px solid var(--line);border-radius:22px;background:#fff;box-shadow:0 12px 35px rgba(43,63,120,.06)}
+.course-content-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px}
+.course-content-heading h2{margin:5px 0;font-size:24px;color:var(--ink)}
+.course-content-heading p{margin:0;color:var(--muted);font-size:13px;line-height:1.8}
+.video-progress-summary{padding:9px 13px;border-radius:12px;background:#e8f8f2;color:#13866f;font-weight:700;font-size:12px;white-space:nowrap}
+.course-video-workspace{display:grid;grid-template-columns:minmax(230px,.85fr) minmax(0,1.5fr);gap:18px;align-items:start}
+.course-video-list{display:flex;flex-direction:column;gap:8px;max-height:570px;overflow:auto;padding:2px}
+.course-video-item{width:100%;display:flex;align-items:center;gap:10px;text-align:right;padding:12px;border:1px solid var(--line);border-radius:13px;background:#fff;color:var(--ink);cursor:pointer;transition:.2s}
+.course-video-item:hover,.course-video-item.active{border-color:#8188f5;background:#f5f6ff}
+.course-video-number{width:30px;height:30px;flex:0 0 30px;border-radius:10px;background:#edf0ff;color:#5966dc;display:grid;place-items:center;font-weight:800}
+.course-video-title{min-width:0;flex:1;display:flex;flex-direction:column;gap:3px}
+.course-video-title b{font-size:12px;line-height:1.7}
+.course-video-title small{font-size:10px;color:var(--muted)}
+.video-completion{font-size:10px;font-weight:700;white-space:nowrap}
+.video-completion.done{color:#13866f}
+.video-completion.not-done{color:#8891a8}
+.course-video-player-panel{min-width:0;padding:14px;border-radius:16px;background:#f6f8ff;border:1px solid var(--line)}
+.course-video-now{font-size:14px;font-weight:800;color:var(--ink);margin-bottom:12px;line-height:1.8}
+.course-video-player{display:block;width:100%;max-height:460px;aspect-ratio:16/9;background:#111;border-radius:12px;object-fit:contain}
+.course-video-message{font-size:12px;color:var(--muted);line-height:1.8;margin:10px 2px 0}
+@media(max-width:720px){
+  .course-content-section{padding:16px}
+  .course-content-heading{align-items:flex-start;flex-direction:column}
+  .course-video-workspace{grid-template-columns:1fr}
+  .course-video-list{max-height:320px}
+  .course-video-player{max-height:320px}
+}
