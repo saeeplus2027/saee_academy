@@ -55,48 +55,49 @@ def safe_text(value, max_len=200):
 
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
-        # CORS headers are also attached to error responses; otherwise the
-        # browser hides the real API error and reports only "Failed to fetch".
-        path = urlsplit(request.url).path
-        method = request.method.upper()
-        origin = request.headers.get("origin", "")
-        allowed_origins = {
-            "https://saeeplus2027.github.io",
-            "http://localhost:8787",
-            "http://127.0.0.1:8787",
-        }
-        allowed_origin = origin if origin in allowed_origins else ""
         cors = {}
-        if path.startswith("/api/") and allowed_origin:
-            cors = {
-                "access-control-allow-origin": allowed_origin,
-                "access-control-allow-credentials": "true",
-                "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-                "access-control-allow-headers": "content-type,x-video-title,x-bootstrap-key",
-                "access-control-max-age": "86400",
-                "vary": "Origin",
+        path = ""
+        try:
+            path = urlsplit(request.url).path
+            method = request.method.upper()
+            origin = request.headers.get("origin", "")
+            allowed_origins = {
+                "https://saeeplus2027.github.io",
+                "http://localhost:8787",
+                "http://127.0.0.1:8787",
             }
 
-        if path.startswith("/api/") and method == "OPTIONS":
-            if not cors:
-                return Response("Origin not allowed", status=403)
-            return Response("", status=204, headers=cors)
+            if path.startswith("/api/") and origin in allowed_origins:
+                cors = {
+                    "access-control-allow-origin": origin,
+                    "access-control-allow-credentials": "true",
+                    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+                    "access-control-allow-headers": "content-type,x-video-title,x-bootstrap-key",
+                    "access-control-max-age": "86400",
+                    "vary": "Origin",
+                }
 
-        try:
+            # Browsers send a preflight before JSON POST requests. It must
+            # succeed before /api/auth/register can be called.
+            if path.startswith("/api/") and method == "OPTIONS":
+                if not cors:
+                    return Response("Origin not allowed", status=403)
+                return Response("", status=204, headers=cors)
+
             if path.startswith("/api/"):
                 result = await self.api(request, path, method)
-                headers = dict(result.headers)
+                headers = dict(result.headers.items())
                 headers.update(cors)
                 return Response(result.body, status=result.status, headers=headers)
 
-            # Static frontend. Assets binding is configured in wrangler.toml.
+            # Static frontend assets remain served by the existing ASSETS binding.
             return await self.env.ASSETS.fetch(request)
-        except Exception as exc:
-            error = json_response(
-                {"error": "خطأ في الخادم: " + str(exc)[:240]}, 500,
+        except Exception:
+            return json_response(
+                {"error": "حدث خطأ داخلياً في الخادم. حاول مرة أخرى."},
+                500,
                 headers=cors,
             )
-            return error
 
     async def current_user(self, request):
         token = cookie_value(request, "saee_session")

@@ -1,8 +1,11 @@
-name: Deploy Saee Academy frontend to GitHub Pages
+name: Deploy Saee Academy website to GitHub Pages
 
 on:
   push:
     branches: ["main"]
+    paths:
+      - "public/**"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -23,9 +26,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Setup Pages
+      - name: Configure Pages
         uses: actions/configure-pages@v5
-      - name: Upload public website
+      - name: Upload frontend only
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./public

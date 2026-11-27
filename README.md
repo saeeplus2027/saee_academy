@@ -63,20 +63,19 @@
 بعد تسجيل الدخول بحساب الأدمن افتح `/admin.html` لإدارة طلبات الاشتراك والتخصصات والمواد ورفع الفيديوهات. صفحة الإدارة منفصلة عن الواجهة العامة، وتتحقق الخوادم من دور الأدمن في كل endpoint.
 
 
-## نشر الواجهة على GitHub Pages
+## النشر من GitHub (الواجهة + الخادم)
 
-تم إعداد GitHub Actions لنشر محتويات `public/` فقط:
-1. من المستودع افتح **Settings → Pages**.
-2. غيّر **Build and deployment → Source** إلى **GitHub Actions** (وليس Deploy from a branch).
-3. ارفع التعديلات إلى فرع `main`، ثم راقب تشغيل workflow باسم **Deploy Saee Academy frontend to GitHub Pages** من تبويب Actions.
-4. ملفات الواجهة تستخدم مسارات نسبية لتعمل تحت رابط المشروع `.../saee_academy/`.
+- الواجهة تُنشر من مجلد `public/` بواسطة Workflow باسم `Deploy Saee Academy website to GitHub Pages`. اجعل مصدر Pages هو `GitHub Actions`.
+- خادم التسجيل وواجهات API يُنشر بشكل مستقل على Cloudflare بواسطة Workflow باسم `Deploy Saee Academy API to Cloudflare`.
+- قبل أول نشر للخادم، أضف GitHub Actions Secret باسم `CLOUDFLARE_API_TOKEN` في `Settings → Secrets and variables → Actions`. استخدم Cloudflare API Token بصلاحية نشر Workers في الحساب المرتبط بـ `account_id` في `wrangler.toml`. لا تضع الرمز في أي ملف بالمستودع.
+- بعد إضافة السر ورفع التعديلات، راقب عمليتي النشر في تبويب `Actions`. نجاح نشر GitHub Pages وحده لا ينشر API.
+- عنوان API مضبوط في `public/config.js` على `https://saee-academy-api.ligagym.workers.dev`. يجب أن يكون هذا هو عنوان Worker المنشور في حساب Cloudflare.
 
-**مهم:** GitHub Pages يستضيف ملفات الواجهة الثابتة فقط، ولا يشغّل Python Worker أو D1 أو R2. بعد نشر Worker، افتح `public/config.js` وضع رابط Worker الحقيقي في `window.SAEE_API_BASE`، ثم ارفع التعديل إلى GitHub. اترك القيمة فارغة فقط إذا كانت الواجهة مستضافة على نفس نطاق Worker.
 
-تم ضبط CORS للسماح بواجهة `https://saeeplus2027.github.io` مع بيانات اعتماد الجلسة. لأن GitHub Pages وWorkers.dev نطاقان مختلفان، قد تمنع بعض المتصفحات ملفات تعريف الارتباط التابعة لجهة خارجية؛ للاستخدام الإنتاجي الأفضل ربط الواجهة والـ API بنطاق مخصص واحد أو جعل Worker يقدم الواجهة والـ API من نفس النطاق.
+## النشر من GitHub (الواجهة + الخادم)
 
-## ملاحظات تنفيذية
-
-- نشر GitHub Pages لا ينشر الـ Worker تلقائياً؛ انشره بشكل منفصل باستخدام `uv run pywrangler deploy`.
-- لا تضع أسرار Cloudflare أو كلمة مرور الأدمن في ملفات الواجهة أو المستودع.
-- رفع الفيديوهات الكبيرة عبر طلب واحد قد يتجاوز حدود المنصة/المتصفح حتى لو كان الحد البرمجي 500MB؛ اختبر الحجم الفعلي على حسابك.
+- الواجهة تُنشر من مجلد `public/` بواسطة Workflow باسم `Deploy Saee Academy website to GitHub Pages`. اجعل مصدر Pages هو `GitHub Actions`.
+- خادم التسجيل وواجهات API يُنشر بشكل مستقل على Cloudflare بواسطة Workflow باسم `Deploy Saee Academy API to Cloudflare`.
+- قبل أول نشر للخادم، أضف GitHub Actions Secret باسم `CLOUDFLARE_API_TOKEN` في `Settings → Secrets and variables → Actions`. استخدم Cloudflare API Token بصلاحية نشر Workers في الحساب المرتبط بـ `account_id` في `wrangler.toml`. لا تضع الرمز في أي ملف بالمستودع.
+- بعد إضافة السر ورفع التعديلات، راقب عمليتي النشر في تبويب `Actions`. نجاح نشر GitHub Pages وحده لا ينشر API.
+- عنوان API مضبوط في `public/config.js` على `https://saee-academy-api.ligagym.workers.dev`. يجب أن يكون هذا هو عنوان Worker المنشور في حساب Cloudflare.

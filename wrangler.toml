@@ -1,4 +1,6 @@
 name = "saee-academy-api"
+account_id = "bbfb58a712000ff24625a5960c5615ed"
+workers_dev = true
 main = "src/entry.py"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["python_workers"]
