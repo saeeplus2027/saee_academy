@@ -80,13 +80,6 @@ def token_digest(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def session_token(request):
-    authorization = request.headers.get("authorization", "")
-    if authorization.lower().startswith("bearer "):
-        return authorization[7:].strip()
-    return cookie_value(request, "saee_session")
-
-
 def cookie_value(request, name):
     raw = request.headers.get("cookie", "")
     for item in raw.split(";"):
@@ -175,7 +168,12 @@ class Default(WorkerEntrypoint):
         ).run()
 
     async def current_user(self, request):
-        token = session_token(request)
+        # GitHub Pages and workers.dev are different sites; browsers may block
+        # the cross-site session cookie. Prefer an explicit bearer token.
+        authorization = request.headers.get("authorization", "")
+        token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+        if not token:
+            token = cookie_value(request, "saee_session")
         if not token:
             return None
 
@@ -443,7 +441,7 @@ class Default(WorkerEntrypoint):
                     500,
                 )
             return json_response(
-                {"ok": True, "message": "تم إنشاء الحساب وتسجيل دخولك بنجاح.", "access_token": token},
+                {"ok": True, "session_token": token, "message": "تم إنشاء الحساب وتسجيل دخولك بنجاح."},
                 201,
                 headers={
                     "set-cookie": (
@@ -490,7 +488,7 @@ class Default(WorkerEntrypoint):
             ).bind(token_digest(token), row["id"], expires).run()
 
             return json_response(
-                {"ok": True, "access_token": token},
+                {"ok": True, "session_token": token},
                 headers={
                     "set-cookie": (
                         f"saee_session={token}; HttpOnly; Secure; "
@@ -500,7 +498,7 @@ class Default(WorkerEntrypoint):
             )
 
         if path == "/api/auth/logout" and method == "POST":
-            token = session_token(request)
+            token = cookie_value(request, "saee_session")
             if token:
                 await self.env.DB.prepare(
                     "DELETE FROM sessions WHERE token_hash=?"
@@ -565,7 +563,7 @@ class Default(WorkerEntrypoint):
                 ).bind(full_name, new_hash, new_salt, user["id"]).run()
                 # Revoke other sessions after changing a password, then refresh the
                 # current session expiry by preserving its current token.
-                current_token = session_token(request)
+                current_token = cookie_value(request, "saee_session")
                 await self.env.DB.prepare(
                     "DELETE FROM sessions WHERE user_id=? AND token_hash<>?"
                 ).bind(user["id"], token_digest(current_token)).run()

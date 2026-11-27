@@ -1,7 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const API_BASE = (window.SAEE_API_BASE || '').replace(/\/$/, '');
-const AUTH_TOKEN_KEY = 'saee_academy_access_token';
+const AUTH_TOKEN_KEY = 'saee_academy_session_token';
 const page = document.body.dataset.page || 'home';
 let currentUser = null;
 let courses = [];
@@ -13,9 +13,9 @@ if ($('#year')) $('#year').textContent = new Date().getFullYear();
 
 async function api(path, options = {}) {
   if (!API_BASE) throw new Error('إعداد الاتصال بالخادم غير موجود.');
-  const accessToken = localStorage.getItem(AUTH_TOKEN_KEY);
+  const savedToken = localStorage.getItem(AUTH_TOKEN_KEY);
   const headers = {
-    ...(accessToken ? {authorization: `Bearer ${accessToken}`} : {}),
+    ...(savedToken ? {authorization: `Bearer ${savedToken}`} : {}),
     ...(options.body && typeof options.body === 'string' ? {'content-type': 'application/json'} : {}),
     ...(options.headers || {})
   };
@@ -32,6 +32,7 @@ async function api(path, options = {}) {
   let data = {};
   try { data = await response.json(); } catch {}
   if (!response.ok) throw new Error(data.error || 'تعذر تنفيذ الطلب.');
+  if (data.session_token) localStorage.setItem(AUTH_TOKEN_KEY, data.session_token);
   return data;
 }
 
@@ -194,10 +195,9 @@ function setupSharedControls() {
     button.disabled = true;
     $('#authError').textContent = '';
     try {
-      const authResult = await api(mode === 'login' ? '/api/auth/login' : '/api/auth/register', {
+      await api(mode === 'login' ? '/api/auth/login' : '/api/auth/register', {
         method: 'POST', body: JSON.stringify(body)
       });
-      if (authResult.access_token) localStorage.setItem(AUTH_TOKEN_KEY, authResult.access_token);
       closeModals();
       event.currentTarget.reset();
       await refreshUser();
