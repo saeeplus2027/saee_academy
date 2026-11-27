@@ -469,6 +469,7 @@ $('#adminUsersList').addEventListener('click', async event => {
 const SITE_CONTENT_DEFAULTS = {
   site_title: 'سعي أكاديمي | Saee Academy',
   brand_name: 'سعي أكاديمي',
+  subscription_contact_phone: '',
   logo_url: '',
   favicon_url: '',
   hero_eyebrow: 'تعلم بذكاء • تقدّم بثقة',

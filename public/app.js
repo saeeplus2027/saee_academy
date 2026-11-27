@@ -382,6 +382,20 @@ function renderCourses() {
   `).join('');
 }
 
+async function getSubscriptionContactMarkup() {
+  let phone = '';
+  try {
+    const result = await api('/api/site-content', {cache: 'no-store'});
+    phone = String(result.items?.subscription_contact_phone || '').trim();
+  } catch {}
+  if (!phone) {
+    return `<div class="subscription-contact-card"><b>للاستفسار والاشتراك تواصل على الرقم التالي</b><span class="subscription-contact-missing">سيتم إضافة رقم التواصل قريباً.</span></div>`;
+  }
+  const safePhone = escapeHtml(phone);
+  const telPhone = phone.replace(/[^+\d]/g, '');
+  return `<div class="subscription-contact-card"><b>للاستفسار والاشتراك تواصل على الرقم التالي</b><a class="subscription-contact-number" href="tel:${escapeHtml(telPhone)}" dir="ltr">${safePhone}</a></div>`;
+}
+
 async function loadCourseDetail() {
   const courseId = new URLSearchParams(location.search).get('id');
   const target = $('#coursePage');
@@ -420,8 +434,7 @@ async function loadCourseDetail() {
           <a class="btn btn-primary btn-lg course-content-jump" href="#courseContent">عرض محتوى المادة</a>
         ` : `
           ${enrollmentStatusMarkup(c.id)}
-          ${enrollmentActionMarkup(c.id)}
-          <p id="courseEnrollMessage" class="form-error" role="status"></p>
+          ${await getSubscriptionContactMarkup()}
         `}
         <a class="text-link" href="courses.html">العودة إلى المواد</a>
       </div>
@@ -435,9 +448,7 @@ async function loadCourseDetail() {
         </section>
       ` : ''}
     `;
-    if (!isApproved) {
-      $('#courseEnrollButton')?.addEventListener('click', requestEnrollment);
-    } else {
+    if (isApproved) {
       await loadCourseVideos(c.id);
     }
   } catch (error) {

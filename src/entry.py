@@ -769,6 +769,7 @@ class Default(WorkerEntrypoint):
         if path == "/api/admin/site-content" and method == "PUT":
             allowed_keys = {
                 "site_title", "brand_name", "logo_url", "favicon_url",
+                "subscription_contact_phone",
                 "hero_eyebrow", "hero_title", "hero_emphasis", "hero_description",
                 "how_eyebrow", "how_title", "how_description",
                 "step_1_title", "step_1_text", "step_2_title", "step_2_text",
