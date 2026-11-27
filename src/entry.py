@@ -3,6 +3,15 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 from workers import WorkerEntrypoint, Response
 
+# Cloudflare Python Workers run on Pyodide, where hashlib.pbkdf2_hmac may
+# be unavailable. Use the Workers Web Crypto implementation there; retain
+# the standard-library fallback for ordinary local CPython execution.
+try:
+    from js import crypto, Uint8Array
+except ImportError:  # pragma: no cover - used only outside Python Workers
+    crypto = None
+    Uint8Array = None
+
 PBKDF2_ROUNDS = 310000
 SESSION_DAYS = 14
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
@@ -19,10 +28,42 @@ def json_response(data, status=200, headers=None):
     return Response.json(data, status=status, headers=h)
 
 
-def password_hash(password, salt):
-    return hashlib.pbkdf2_hmac(
-        "sha256", password.encode(), salt.encode(), PBKDF2_ROUNDS
-    ).hex()
+async def password_hash(password, salt):
+    """Return PBKDF2-HMAC-SHA256(password, salt, 310000, 32 bytes) as hex.
+
+    Workers use Web Crypto because Pyodide's hashlib build does not expose
+    pbkdf2_hmac. The algorithm, iteration count, salt encoding, and output
+    length match hashlib.pbkdf2_hmac so hashes remain interoperable.
+    """
+    password_bytes = password.encode("utf-8")
+    salt_bytes = salt.encode("utf-8")
+
+    if crypto is None or Uint8Array is None:
+        return hashlib.pbkdf2_hmac(
+            "sha256", password_bytes, salt_bytes, PBKDF2_ROUNDS, dklen=32
+        ).hex()
+
+    password_data = Uint8Array.new(list(password_bytes))
+    salt_data = Uint8Array.new(list(salt_bytes))
+    key = await crypto.subtle.importKey(
+        "raw",
+        password_data,
+        {"name": "PBKDF2"},
+        False,
+        ["deriveBits"],
+    )
+    derived = await crypto.subtle.deriveBits(
+        {
+            "name": "PBKDF2",
+            "salt": salt_data,
+            "iterations": PBKDF2_ROUNDS,
+            "hash": "SHA-256",
+        },
+        key,
+        256,
+    )
+    output = Uint8Array.new(derived)
+    return "".join(format(int(output[i]), "02x") for i in range(output.length))
 
 
 def token_digest(token):
@@ -177,7 +218,7 @@ class Default(WorkerEntrypoint):
                     "(id,full_name,email,password_hash,password_salt,role) "
                     "VALUES(?,?,?,?,?,'admin')"
                 ).bind(
-                    uid, name, email, password_hash(password, salt), salt
+                    uid, name, email, await password_hash(password, salt), salt
                 ).run()
             except Exception:
                 return json_response(
@@ -251,7 +292,7 @@ class Default(WorkerEntrypoint):
                     "(id,full_name,email,password_hash,password_salt) "
                     "VALUES(?,?,?,?,?)"
                 ).bind(
-                    uid, name, email, password_hash(password, salt), salt
+                    uid, name, email, await password_hash(password, salt), salt
                 ).run()
             except Exception as exc:
                 # Handle a possible concurrent registration safely, then log
@@ -306,7 +347,7 @@ class Default(WorkerEntrypoint):
             ).bind(email).first()
 
             candidate = (
-                password_hash(password, row["password_salt"])
+                await password_hash(password, row["password_salt"])
                 if row and isinstance(password, str)
                 else ""
             )
