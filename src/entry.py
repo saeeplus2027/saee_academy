@@ -143,7 +143,10 @@ class Default(WorkerEntrypoint):
 
             # Static frontend assets remain served by the existing ASSETS binding.
             return await self.env.ASSETS.fetch(request)
-        except Exception:
+        except Exception as exc:
+            # Keep the public response generic, but retain the real exception
+            # in Cloudflare Worker logs to make future diagnosis possible.
+            print("[SAEE_API_ERROR]", path, type(exc).__name__, str(exc))
             return json_response(
                 {"error": "حدث خطأ داخلياً في الخادم. حاول مرة أخرى."},
                 500,
@@ -622,15 +625,30 @@ class Default(WorkerEntrypoint):
                     {"error": "محتوى المادة متاح للمشتركين المقبولين فقط."}, 403
                 )
 
-            rows = await self.env.DB.prepare(
-                "SELECT v.id,v.title,v.position,"
-                "CASE WHEN p.video_id IS NULL THEN 0 ELSE 1 END AS completed,"
-                "p.completed_at "
-                "FROM videos v LEFT JOIN video_progress p "
-                "ON p.video_id=v.id AND p.user_id=? "
-                "WHERE v.course_id=? ORDER BY v.position"
-            ).bind(user["id"], course_id).all()
-            return json_response({"items": rows.results})
+            # Fetch every video attached to this course. Progress tracking was
+            # introduced by migration 0003; if an existing D1 database has not
+            # received that optional table yet, the video library must still
+            # load instead of failing with a generic HTTP 500.
+            try:
+                rows = await self.env.DB.prepare(
+                    "SELECT v.id,v.title,v.position,"
+                    "CASE WHEN p.video_id IS NULL THEN 0 ELSE 1 END AS completed,"
+                    "p.completed_at "
+                    "FROM videos v LEFT JOIN video_progress p "
+                    "ON p.video_id=v.id AND p.user_id=? "
+                    "WHERE v.course_id=? ORDER BY v.position"
+                ).bind(user["id"], course_id).all()
+                return json_response({"items": rows.results})
+            except Exception as progress_error:
+                print(
+                    "[SAEE_COURSE_CONTENT_PROGRESS_FALLBACK]",
+                    type(progress_error).__name__, str(progress_error)
+                )
+                rows = await self.env.DB.prepare(
+                    "SELECT id,title,position,0 AS completed,NULL AS completed_at "
+                    "FROM videos WHERE course_id=? ORDER BY position"
+                ).bind(course_id).all()
+                return json_response({"items": rows.results})
 
         # Persist completion only for a video the student is currently
         # authorized to watch. The frontend calls this when playback ends.
@@ -1020,18 +1038,8 @@ class Default(WorkerEntrypoint):
                     {"error": "أرسل ملف فيديو وعنواناً صالحاً."}, 400
                 )
 
-            # Stream the upload straight into R2 instead of buffering the
-            # whole file in Worker memory (Workers have a ~128MB memory cap,
-            # and the Python Request wrapper has no arrayBuffer() method).
-            try:
-                length = int(request.headers.get("content-length", "0") or 0)
-            except ValueError:
-                length = 0
-            if length <= 0:
-                return json_response(
-                    {"error": "ملف الفيديو فارغ أو حجمه غير معروف."}, 400
-                )
-            if length > 500 * 1024 * 1024:
+            raw = await request.arrayBuffer()
+            if len(raw) > 500 * 1024 * 1024:
                 return json_response(
                     {"error": "حجم الفيديو يتجاوز 500 ميغابايت."}, 413
                 )
@@ -1040,12 +1048,7 @@ class Default(WorkerEntrypoint):
             key = f"courses/{course_id}/{vid}"
 
             await self.env.MEDIA.put(
-                key,
-                request.js_object.body,
-                to_js(
-                    {"httpMetadata": {"contentType": content_type}},
-                    dict_converter=Object.fromEntries,
-                ),
+                key, raw, httpMetadata={"contentType": content_type}
             )
 
             last_position = await self.env.DB.prepare(
