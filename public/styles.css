@@ -194,3 +194,7 @@ body{background:var(--bg);color:var(--ink);font-family:'Alexandria',Tahoma,sans-
 }
 
 @media(max-width:560px){.topbar nav.site-nav .site-nav a{font-size:8px!important;letter-spacing:-.2px;padding-inline:1px}.topbar nav.site-nav a{font-size:8px!important;letter-spacing:-.2px;padding-inline:1px}}
+
+/* Explicit question-library additions in admin */
+.question-library-existing-subjects{margin:12px 0 24px;padding:16px;background:#faf8f3;border:1px solid #eee8dc;border-radius:12px}
+.question-library-existing-subjects .btn{margin:4px 0 10px}

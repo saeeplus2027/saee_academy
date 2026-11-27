@@ -220,6 +220,18 @@ class Default(WorkerEntrypoint):
             "id TEXT PRIMARY KEY,name TEXT NOT NULL COLLATE NOCASE UNIQUE,"
             "created_by TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
         ).run()
+        await self.env.DB.prepare(
+            "CREATE TABLE IF NOT EXISTS question_library_courses ("
+            "course_id TEXT PRIMARY KEY,created_by TEXT,"
+            "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        ).run()
+        # Backfill only courses that already had PDFs uploaded from the dedicated
+        # question-library admin screen; do not expose every regular course.
+        await self.env.DB.prepare(
+            "INSERT OR IGNORE INTO question_library_courses(course_id,created_by) "
+            "SELECT DISTINCT course_id,created_by FROM question_files "
+            "WHERE course_id NOT LIKE 'library:%' AND course_id<>''"
+        ).run()
 
     async def api(self, request, path, method):
         # Health-check endpoint.
@@ -610,12 +622,14 @@ class Default(WorkerEntrypoint):
         # section; no paid-course enrollment is required for these user-uploaded files.
         if path == "/api/question-files" and method == "GET":
             await self.ensure_question_files_table()
-            # Both ordinary course subjects and independent question-library subjects
-            # are returned here. Independent subjects never enter the paid courses table.
+            # Only subjects deliberately added from the question-library admin tab
+            # are listed. Creating a regular course in the teaching area is not enough.
             rows = await self.env.DB.prepare(
                 "SELECT c.id AS id,'course' AS source_type,c.name AS name,"
                 "s.name AS specialization_name,COUNT(qf.id) AS file_count "
-                "FROM courses c JOIN specializations s ON s.id=c.specialization_id "
+                "FROM question_library_courses qlc "
+                "JOIN courses c ON c.id=qlc.course_id "
+                "JOIN specializations s ON s.id=c.specialization_id "
                 "LEFT JOIN question_files qf ON qf.course_id=c.id "
                 "WHERE c.is_published=1 GROUP BY c.id,c.name,s.name "
                 "UNION ALL "
@@ -640,7 +654,8 @@ class Default(WorkerEntrypoint):
                 stored_course_key = "library:" + subject_id
             else:
                 course = await self.env.DB.prepare(
-                    "SELECT id FROM courses WHERE id=? AND is_published=1"
+                    "SELECT c.id FROM courses c JOIN question_library_courses qlc "
+                    "ON qlc.course_id=c.id WHERE c.id=? AND c.is_published=1"
                 ).bind(subject_key).first()
                 if not course:
                     return json_response({"error": "المادة غير موجودة أو غير منشورة."}, 404)
@@ -657,8 +672,10 @@ class Default(WorkerEntrypoint):
             row = await self.env.DB.prepare(
                 "SELECT q.object_key,q.file_name,c.is_published,l.id AS library_subject_id "
                 "FROM question_files q LEFT JOIN courses c ON c.id=q.course_id "
+                "LEFT JOIN question_library_courses qlc ON qlc.course_id=q.course_id "
                 "LEFT JOIN question_library_subjects l ON q.course_id='library:' || l.id "
-                "WHERE q.id=? AND (c.is_published=1 OR l.id IS NOT NULL)"
+                "WHERE q.id=? AND ((c.is_published=1 AND qlc.course_id IS NOT NULL) "
+                "OR l.id IS NOT NULL)"
             ).bind(file_id).first()
             if not row:
                 return json_response({"error": "ملف الأسئلة غير موجود."}, 404)
@@ -866,6 +883,31 @@ class Default(WorkerEntrypoint):
 
     async def admin_api(self, request, path, method):
         # Admin-only PDF library operations. api() only calls admin_api after require_admin.
+        if path == "/api/admin/question-library-courses" and method == "GET":
+            await self.ensure_question_files_table()
+            rows = await self.env.DB.prepare(
+                "SELECT c.id,c.name,s.name AS specialization_name,"
+                "(SELECT COUNT(*) FROM question_files q WHERE q.course_id=c.id) AS file_count "
+                "FROM question_library_courses qlc JOIN courses c ON c.id=qlc.course_id "
+                "JOIN specializations s ON s.id=c.specialization_id ORDER BY s.name,c.name"
+            ).all()
+            return json_response({"items": rows.results})
+
+        if path == "/api/admin/question-library-courses" and method == "POST":
+            await self.ensure_question_files_table()
+            body = await parse_body(request)
+            course_id = safe_text(body.get("course_id"), 80)
+            course = await self.env.DB.prepare(
+                "SELECT id FROM courses WHERE id=?"
+            ).bind(course_id).first()
+            if not course:
+                return json_response({"error": "المادة المحددة غير موجودة ضمن المواد الأساسية."}, 404)
+            admin = await self.current_user(request)
+            await self.env.DB.prepare(
+                "INSERT OR IGNORE INTO question_library_courses(course_id,created_by) VALUES(?,?)"
+            ).bind(course_id, admin["id"]).run()
+            return json_response({"ok": True,"message": "تمت إضافة المادة إلى مكتبة الأسئلة فقط."}, 201)
+
         if path == "/api/admin/question-library-subjects" and method == "GET":
             await self.ensure_question_files_table()
             rows = await self.env.DB.prepare(
@@ -937,7 +979,8 @@ class Default(WorkerEntrypoint):
                 "FROM question_files q LEFT JOIN courses c ON c.id=q.course_id "
                 "LEFT JOIN specializations s ON s.id=c.specialization_id "
                 "LEFT JOIN question_library_subjects l ON q.course_id='library:' || l.id "
-                "WHERE c.id IS NOT NULL OR l.id IS NOT NULL ORDER BY q.created_at DESC"
+                "LEFT JOIN question_library_courses qlc ON qlc.course_id=q.course_id "
+                "WHERE l.id IS NOT NULL OR qlc.course_id IS NOT NULL ORDER BY q.created_at DESC"
             ).all()
             return json_response({"items": rows.results})
 
@@ -1031,6 +1074,11 @@ class Default(WorkerEntrypoint):
                 except Exception as cleanup_exc:
                     print("[SAEE_QUESTION_R2_CLEANUP_WARNING]", type(cleanup_exc).__name__, str(cleanup_exc))
                 return json_response({"error": "فشل حفظ بيانات الملف. لم تتم إضافته إلى المكتبة."}, 500)
+
+            if not course_id.startswith("library:"):
+                await self.env.DB.prepare(
+                    "INSERT OR IGNORE INTO question_library_courses(course_id,created_by) VALUES(?,?)"
+                ).bind(course_id, current_admin["id"]).run()
 
             return json_response({"ok": True, "id": file_id}, 201)
 
@@ -1166,6 +1214,9 @@ class Default(WorkerEntrypoint):
                     print("[SAEE_QUESTION_R2_COURSE_DELETE_WARNING]", type(exc).__name__, str(exc))
             await self.env.DB.prepare(
                 "DELETE FROM question_files WHERE course_id=?"
+            ).bind(cid).run()
+            await self.env.DB.prepare(
+                "DELETE FROM question_library_courses WHERE course_id=?"
             ).bind(cid).run()
             for video in video_rows.results:
                 try:

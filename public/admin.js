@@ -98,7 +98,7 @@ async function loadAll() {
   await loadSpecializations();
   await Promise.all([loadRequests(), loadCourses(), loadUsers(), loadSiteContent()]);
   await loadVideos();
-  await Promise.all([loadAdminQuestionSubjects(), loadAdminQuestionFiles()]);
+  await Promise.all([loadAdminQuestionSubjects(), loadAdminQuestionCourses(), loadAdminQuestionFiles()]);
 }
 
 async function loadSpecializations() {
@@ -123,7 +123,14 @@ async function loadSpecializations() {
         $('#questionFileSpecialization').value = previousQuestionSpec;
       }
     }
+    const librarySpec = $('#questionLibraryCourseSpecialization');
+    if (librarySpec) {
+      const previousLibrarySpec = librarySpec.value;
+      librarySpec.innerHTML = options;
+      if (adminSpecializations.some(item => item.id === previousLibrarySpec)) librarySpec.value = previousLibrarySpec;
+    }
     renderQuestionFileCourseOptions();
+    renderQuestionLibraryCourseOptions();
   } catch (error) {
     $('#adminSpecializationsList').textContent = error.message;
     toast(error.message);
@@ -222,6 +229,7 @@ async function loadCourses() {
     adminCourses = result.items || [];
     renderVideoCourseOptions();
     renderQuestionFileCourseOptions();
+    renderQuestionLibraryCourseOptions();
     renderAdminCourses();
     await loadVideos();
   } catch (error) {
@@ -459,6 +467,53 @@ function toggleQuestionFileTarget() {
   if (librarySelect) librarySelect.required = type === 'library';
 }
 
+function renderQuestionLibraryCourseOptions() {
+  const specialization = $('#questionLibraryCourseSpecialization');
+  const courseSelect = $('#questionLibraryCourseSelect');
+  if (!specialization || !courseSelect) return;
+  const selectedSpecialization = specialization.value;
+  const previousCourse = courseSelect.value;
+  const filtered = adminCourses.filter(course =>
+    !selectedSpecialization || course.specialization_id === selectedSpecialization
+  );
+  courseSelect.innerHTML = '<option value="">اختر المادة</option>' + filtered.map(course =>
+    `<option value="${esc(course.id)}">${esc(course.name)}</option>`
+  ).join('');
+  if (filtered.some(course => course.id === previousCourse)) courseSelect.value = previousCourse;
+  if (!filtered.length) courseSelect.innerHTML = '<option value="">لا توجد مواد لهذا التخصص</option>';
+}
+
+async function loadAdminQuestionCourses() {
+  const target = $('#adminQuestionCoursesList');
+  if (!target) return;
+  try {
+    const result = await api('/api/admin/question-library-courses', {cache: 'no-store'});
+    const items = Array.isArray(result.items) ? result.items : [];
+    target.innerHTML = items.length ? items.map(item => `
+      <article class="management-card question-admin-file-row">
+        <div><b>${esc(item.name)}</b><small>${esc(item.specialization_name)} · مضافة إلى مكتبة الأسئلة فقط · ${Number(item.file_count || 0)} ملف PDF</small></div>
+      </article>
+    `).join('') : '<div class="empty-state">لا توجد مواد من مواد الاشتراك مضافة إلى مكتبة الأسئلة بعد.</div>';
+  } catch (error) { target.textContent = error.message; }
+}
+
+$('#questionLibraryCourseSpecialization')?.addEventListener('change', renderQuestionLibraryCourseOptions);
+$('#addQuestionCourseToLibrary')?.addEventListener('click', async () => {
+  const courseId = $('#questionLibraryCourseSelect')?.value || '';
+  if (!courseId) { message('#questionLibraryCourseMessage', 'اختر التخصص والمادة أولاً.'); return; }
+  const button = $('#addQuestionCourseToLibrary'); button.disabled = true;
+  message('#questionLibraryCourseMessage', 'جارٍ إضافة المادة إلى مكتبة الأسئلة...');
+  try {
+    await api('/api/admin/question-library-courses', {
+      method: 'POST', body: JSON.stringify({course_id: courseId})
+    });
+    message('#questionLibraryCourseMessage', 'تمت إضافة المادة إلى مكتبة الأسئلة فقط.');
+    toast('تمت إضافة المادة إلى مكتبة الأسئلة فقط.');
+    await loadAdminQuestionCourses();
+  } catch (error) { message('#questionLibraryCourseMessage', error.message); }
+  finally { button.disabled = false; }
+});
+
 async function loadAdminQuestionSubjects() {
   const target = $('#adminQuestionSubjectsList');
   if (!target) return;
@@ -631,7 +686,7 @@ $('#questionFileForm')?.addEventListener('submit', async event => {
     toast('تمت إضافة ملف الأسئلة.');
     event.currentTarget.reset();
     renderQuestionFileCourseOptions();
-    await Promise.all([loadAdminQuestionSubjects(), loadAdminQuestionFiles()]);
+    await Promise.all([loadAdminQuestionSubjects(), loadAdminQuestionCourses(), loadAdminQuestionFiles()]);
   } catch (error) {
     message('#questionFileMessage', error.message);
   } finally {
