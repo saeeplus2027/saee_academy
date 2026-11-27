@@ -1,0 +1,22 @@
+name = "saee-academy-api"
+main = "src/entry.py"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["python_workers"]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "saee-academy-db"
+database_id = "3cd1a2ed-694e-4ad5-ba7d-bd59ecbe774d"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "saee-academy-media"
+
+[vars]
+APP_NAME = "Saee Academy"
+COOKIE_SECURE = "true"
