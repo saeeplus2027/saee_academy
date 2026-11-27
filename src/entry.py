@@ -153,6 +153,20 @@ class Default(WorkerEntrypoint):
                 headers=cors,
             )
 
+    async def ensure_video_progress_table(self):
+        """Create progress storage on demand for databases where migration 0003 was not applied."""
+        await self.env.DB.prepare(
+            "CREATE TABLE IF NOT EXISTS video_progress ("
+            "user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
+            "video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,"
+            "completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            "PRIMARY KEY (user_id, video_id))"
+        ).run()
+        await self.env.DB.prepare(
+            "CREATE INDEX IF NOT EXISTS idx_video_progress_user_video "
+            "ON video_progress(user_id, video_id)"
+        ).run()
+
     async def current_user(self, request):
         token = cookie_value(request, "saee_session")
         if not token:
@@ -364,9 +378,31 @@ class Default(WorkerEntrypoint):
                     500,
                 )
 
+            # Create a session immediately after registration so the student
+            # enters the site without being asked to sign in a second time.
+            token = secrets.token_urlsafe(32)
+            expires = (
+                datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)
+            ).isoformat()
+            try:
+                await self.env.DB.prepare(
+                    "INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)"
+                ).bind(token_digest(token), uid, expires).run()
+            except Exception as exc:
+                print("[SAEE_REGISTER_SESSION_ERROR]", type(exc).__name__, str(exc))
+                return json_response(
+                    {"error": "تم إنشاء الحساب، لكن تعذر بدء الجلسة. سجّل الدخول مرة واحدة."},
+                    500,
+                )
             return json_response(
-                {"ok": True, "message": "تم إنشاء الحساب. سجل الدخول للمتابعة."},
+                {"ok": True, "message": "تم إنشاء الحساب وتسجيل دخولك بنجاح."},
                 201,
+                headers={
+                    "set-cookie": (
+                        f"saee_session={token}; HttpOnly; Secure; "
+                        f"SameSite=None; Path=/; Max-Age={SESSION_DAYS * 86400}"
+                    )
+                },
             )
 
         if path == "/api/auth/login" and method == "POST":
@@ -630,6 +666,7 @@ class Default(WorkerEntrypoint):
             # received that optional table yet, the video library must still
             # load instead of failing with a generic HTTP 500.
             try:
+                await self.ensure_video_progress_table()
                 rows = await self.env.DB.prepare(
                     "SELECT v.id,v.title,v.position,"
                     "CASE WHEN p.video_id IS NULL THEN 0 ELSE 1 END AS completed,"
@@ -653,6 +690,7 @@ class Default(WorkerEntrypoint):
         # Persist completion only for a video the student is currently
         # authorized to watch. The frontend calls this when playback ends.
         if path.startswith("/api/watch/") and path.endswith("/complete") and method in ("POST", "DELETE"):
+            await self.ensure_video_progress_table()
             video_id = path.split("/")[-2]
             now = datetime.now(timezone.utc).isoformat()
             access = await self.env.DB.prepare(

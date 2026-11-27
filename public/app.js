@@ -193,15 +193,10 @@ function setupSharedControls() {
       await api(mode === 'login' ? '/api/auth/login' : '/api/auth/register', {
         method: 'POST', body: JSON.stringify(body)
       });
-      if (mode === 'register') {
-        toast('تم إنشاء الحساب بنجاح. سجّل الدخول الآن.');
-        event.currentTarget.reset();
-        openAuth('login');
-      } else {
-        closeModals();
-        await refreshUser();
-        toast('أهلاً بك في سعي أكاديمي.');
-      }
+      closeModals();
+      event.currentTarget.reset();
+      await refreshUser();
+      toast(mode === 'register' ? 'تم إنشاء حسابك وتسجيل دخولك بنجاح.' : 'أهلاً بك في سعي أكاديمي.');
     } catch (error) {
       $('#authError').textContent = error.message;
     } finally {
