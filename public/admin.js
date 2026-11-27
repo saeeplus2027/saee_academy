@@ -416,12 +416,9 @@ $('#videoForm').addEventListener('submit', async event => {
     titleBytes.forEach(byte => { binaryTitle += String.fromCharCode(byte); });
     const titleBase64Url = btoa(binaryTitle).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
     uploadUrl.searchParams.set('title_b64', titleBase64Url);
-    const sessionToken = localStorage.getItem(AUTH_TOKEN_KEY) || '';
-    if (!sessionToken) throw new Error('انتهت جلسة الإدارة. سجّل الدخول مجدداً.');
     const response = await fetch(uploadUrl.toString(), {
-      method: 'POST', credentials: 'omit',
-      headers: { authorization: `Bearer ${sessionToken}` },
-      // The Worker defaults the stored MIME type to video/mp4.
+      method: 'POST', credentials: 'include',
+      // No custom headers: the Worker defaults the stored MIME type to video/mp4.
       body: file
     });
     let data = {};

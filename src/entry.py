@@ -862,60 +862,44 @@ class Default(WorkerEntrypoint):
                     403,
                 )
 
-            # Support byte-range requests required by native browser video players.
-            # Without 206 + Content-Range, Chrome may show a black player at 0:00.
+            # Pass the incoming Range header to R2. Native HTML video players
+            # request byte ranges (often starting with bytes=0-); returning the
+            # complete object with status 200 can leave playback stuck at 0:00.
             range_header = request.headers.get("range", "")
-            range_match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip()) if range_header else None
-            obj = None
-            status = 200
-            extra_headers = {"accept-ranges": "bytes"}
-            if range_header and not range_match:
-                return Response("Invalid range", status=416, headers={"content-range": "bytes */0"})
-
-            if range_match:
-                start_text, end_text = range_match.groups()
-                head_obj = await self.env.MEDIA.head(access["object_key"])
-                if not head_obj:
-                    return json_response({"error": "الفيديو غير موجود."}, 404)
-                total_size = int(head_obj.size)
-                if not total_size:
-                    return Response(b"", status=416, headers={"content-range": "bytes */0"})
-                if start_text:
-                    start = int(start_text)
-                    end = int(end_text) if end_text else total_size - 1
-                else:
-                    suffix = int(end_text or "0")
-                    start = max(0, total_size - suffix)
-                    end = total_size - 1
-                if start >= total_size or end < start:
-                    return Response(b"", status=416, headers={"content-range": f"bytes */{total_size}"})
-                end = min(end, total_size - 1)
-                length = end - start + 1
-                obj = await self.env.MEDIA.get(access["object_key"], range={"offset": start, "length": length})
-                if not obj:
-                    return json_response({"error": "الفيديو غير موجود."}, 404)
-                status = 206
-                extra_headers.update({
-                    "content-range": f"bytes {start}-{end}/{total_size}",
-                    "content-length": str(length),
-                })
-            else:
-                obj = await self.env.MEDIA.get(access["object_key"])
-                if not obj:
-                    return json_response({"error": "الفيديو غير موجود."}, 404)
-                extra_headers["content-length"] = str(obj.size)
-
-            return Response(
-                obj.body,
-                status=status,
-                headers={
-                    "content-type": obj.httpMetadata.contentType or "video/mp4",
-                    "cache-control": "private, no-store",
-                    "content-disposition": "inline",
-                    "x-content-type-options": "nosniff",
-                    **extra_headers,
-                },
+            obj = await self.env.MEDIA.get(
+                access["object_key"],
+                range=request.headers,
             )
+            if not obj:
+                return json_response({"error": "الفيديو غير موجود."}, 404)
+
+            headers = {
+                "content-type": (
+                    (obj.httpMetadata.contentType if obj.httpMetadata else None)
+                    or "video/mp4"
+                ),
+                "cache-control": "private, no-store",
+                "content-disposition": "inline",
+                "x-content-type-options": "nosniff",
+                "accept-ranges": "bytes",
+            }
+            status = 200
+            if range_header and getattr(obj, "range", None):
+                # R2 returns the selected range metadata after honoring the
+                # request's Range header. Reflect it as a standards-compliant
+                # 206 Partial Content response for the browser media element.
+                selected = obj.range
+                start = int(selected.offset)
+                length = int(selected.length)
+                total = int(obj.size)
+                end = start + length - 1
+                headers["content-range"] = f"bytes {start}-{end}/{total}"
+                headers["content-length"] = str(length)
+                status = 206
+            else:
+                headers["content-length"] = str(int(obj.size))
+
+            return Response(obj.body, status=status, headers=headers)
 
         if path.startswith("/api/admin/"):
             admin = await self.require_admin(request)
