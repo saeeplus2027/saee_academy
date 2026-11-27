@@ -7,12 +7,16 @@ from workers import WorkerEntrypoint, Response
 # be unavailable. Use the Workers Web Crypto implementation there; retain
 # the standard-library fallback for ordinary local CPython execution.
 try:
-    from js import crypto, Uint8Array
+    from js import crypto, Uint8Array, Object
+    from pyodide.ffi import to_js
 except ImportError:  # pragma: no cover - used only outside Python Workers
     crypto = None
     Uint8Array = None
+    Object = None
+    to_js = None
 
-PBKDF2_ROUNDS = 310000
+# Cloudflare Workers Web Crypto rejects PBKDF2 iterations above 100,000.
+PBKDF2_ROUNDS = 100000
 SESSION_DAYS = 14
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
@@ -29,7 +33,7 @@ def json_response(data, status=200, headers=None):
 
 
 async def password_hash(password, salt):
-    """Return PBKDF2-HMAC-SHA256(password, salt, 310000, 32 bytes) as hex.
+    """Return PBKDF2-HMAC-SHA256(password, salt, 100000, 32 bytes) as hex.
 
     Workers use Web Crypto because Pyodide's hashlib build does not expose
     pbkdf2_hmac. The algorithm, iteration count, salt encoding, and output
@@ -43,22 +47,25 @@ async def password_hash(password, salt):
             "sha256", password_bytes, salt_bytes, PBKDF2_ROUNDS, dklen=32
         ).hex()
 
-    password_data = Uint8Array.new(list(password_bytes))
-    salt_data = Uint8Array.new(list(salt_bytes))
+    password_data = Uint8Array.new(to_js(list(password_bytes)))
+    salt_data = Uint8Array.new(to_js(list(salt_bytes)))
     key = await crypto.subtle.importKey(
         "raw",
         password_data,
-        {"name": "PBKDF2"},
+        to_js({"name": "PBKDF2"}, dict_converter=Object.fromEntries),
         False,
-        ["deriveBits"],
+        to_js(["deriveBits"]),
     )
     derived = await crypto.subtle.deriveBits(
-        {
-            "name": "PBKDF2",
-            "salt": salt_data,
-            "iterations": PBKDF2_ROUNDS,
-            "hash": "SHA-256",
-        },
+        to_js(
+            {
+                "name": "PBKDF2",
+                "salt": salt_data,
+                "iterations": PBKDF2_ROUNDS,
+                "hash": "SHA-256",
+            },
+            dict_converter=Object.fromEntries,
+        ),
         key,
         256,
     )
@@ -287,13 +294,24 @@ class Default(WorkerEntrypoint):
             salt = secrets.token_hex(16)
             uid = secrets.token_urlsafe(18)
             try:
+                pw_hash = await password_hash(password, salt)
+            except Exception as exc:
+                print("[SAEE_REGISTER_HASH_ERROR]", type(exc).__name__, str(exc))
+                return json_response(
+                    {
+                        "error": (
+                            "تعذر تشفير كلمة المرور. لم يتم إنشاء الحساب. "
+                            "(SAEE_REGISTER_HASH_ERROR)"
+                        )
+                    },
+                    500,
+                )
+            try:
                 await self.env.DB.prepare(
                     "INSERT INTO users"
                     "(id,full_name,email,password_hash,password_salt) "
                     "VALUES(?,?,?,?,?)"
-                ).bind(
-                    uid, name, email, await password_hash(password, salt), salt
-                ).run()
+                ).bind(uid, name, email, pw_hash, salt).run()
             except Exception as exc:
                 # Handle a possible concurrent registration safely, then log
                 # the actual database error for diagnosis in Worker Logs.
