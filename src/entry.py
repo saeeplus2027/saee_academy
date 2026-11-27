@@ -215,6 +215,34 @@ class Default(WorkerEntrypoint):
                     400,
                 )
 
+            # Check duplicate email explicitly. Do not turn every D1 failure
+            # into a misleading "email already used" response.
+            try:
+                existing = await self.env.DB.prepare(
+                    "SELECT id FROM users WHERE lower(email)=lower(?) LIMIT 1"
+                ).bind(email).first()
+            except Exception as exc:
+                print(
+                    "[SAEE_REGISTER_LOOKUP_ERROR]",
+                    type(exc).__name__,
+                    str(exc),
+                )
+                return json_response(
+                    {
+                        "error": (
+                            "تعذر التحقق من البريد بسبب مشكلة في قاعدة البيانات. "
+                            "لم يتم إنشاء الحساب. (SAEE_REGISTER_LOOKUP_ERROR)"
+                        )
+                    },
+                    500,
+                )
+
+            if existing:
+                return json_response(
+                    {"error": "البريد الإلكتروني مسجل مسبقاً. جرّب تسجيل الدخول."},
+                    409,
+                )
+
             salt = secrets.token_hex(16)
             uid = secrets.token_urlsafe(18)
             try:
@@ -225,9 +253,41 @@ class Default(WorkerEntrypoint):
                 ).bind(
                     uid, name, email, password_hash(password, salt), salt
                 ).run()
-            except Exception:
+            except Exception as exc:
+                # Handle a possible concurrent registration safely, then log
+                # the actual database error for diagnosis in Worker Logs.
+                try:
+                    existing_after_error = await self.env.DB.prepare(
+                        "SELECT id FROM users WHERE lower(email)=lower(?) LIMIT 1"
+                    ).bind(email).first()
+                except Exception as lookup_exc:
+                    existing_after_error = None
+                    print(
+                        "[SAEE_REGISTER_RECHECK_ERROR]",
+                        type(lookup_exc).__name__,
+                        str(lookup_exc),
+                    )
+
+                if existing_after_error:
+                    return json_response(
+                        {"error": "البريد الإلكتروني مسجل مسبقاً. جرّب تسجيل الدخول."},
+                        409,
+                    )
+
+                print(
+                    "[SAEE_REGISTER_DB_ERROR]",
+                    type(exc).__name__,
+                    str(exc),
+                )
                 return json_response(
-                    {"error": "البريد الإلكتروني مستخدم مسبقاً."}, 409
+                    {
+                        "error": (
+                            "تعذر إنشاء الحساب بسبب خطأ في قاعدة البيانات. "
+                            "لم يتم إنشاء الحساب. راجع سجل Worker للرمز "
+                            "SAEE_REGISTER_DB_ERROR."
+                        )
+                    },
+                    500,
                 )
 
             return json_response(
