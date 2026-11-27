@@ -195,12 +195,37 @@ function setupSharedControls() {
     button.disabled = true;
     $('#authError').textContent = '';
     try {
+      // Save the session token returned by the auth endpoint, then confirm the
+      // session before closing the dialog. A short retry handles propagation
+      // delays and updates the navigation immediately without a page reload.
       await api(mode === 'login' ? '/api/auth/login' : '/api/auth/register', {
         method: 'POST', body: JSON.stringify(body)
       });
+
+      let authenticatedUser = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const session = await api('/api/auth/me', {cache: 'no-store'});
+          authenticatedUser = session.user || null;
+          if (authenticatedUser) break;
+        } catch (sessionError) {
+          if (attempt === 3) throw sessionError;
+        }
+        if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+      }
+
+      if (!authenticatedUser) {
+        throw new Error('تم إرسال الطلب، لكن لم يتم تأكيد جلسة الدخول. أعد المحاولة أو تواصل مع الدعم.');
+      }
+
+      currentUser = authenticatedUser;
+      updateNavigation();
       closeModals();
       event.currentTarget.reset();
-      await refreshUser();
+      closeProfileDropdown();
+      if (document.body.dataset.requiresAuth === 'true') {
+        await loadProtectedPage();
+      }
       toast(mode === 'register' ? 'تم إنشاء حسابك وتسجيل دخولك بنجاح.' : 'أهلاً بك في سعي أكاديمي.');
     } catch (error) {
       $('#authError').textContent = error.message;
