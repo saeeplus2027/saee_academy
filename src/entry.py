@@ -1,4 +1,4 @@
-import json, re, secrets, hashlib, hmac, time
+import json, re, secrets, hashlib, hmac, time, base64
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit, unquote, parse_qs
 from workers import WorkerEntrypoint, Response
@@ -995,9 +995,23 @@ class Default(WorkerEntrypoint):
             # titles can otherwise make the browser reject RequestInit before
             # the upload even reaches this Worker.
             query = parse_qs(urlsplit(request.url).query)
-            title_values = query.get("title", [""])
-            title = safe_text(title_values[0], 140) if title_values else ""
-            content_type = request.headers.get("content-type", "application/octet-stream")
+            title = ""
+            encoded_titles = query.get("title_b64", [])
+            if encoded_titles:
+                try:
+                    token = encoded_titles[0].replace("-", "+").replace("_", "/")
+                    token += "=" * (-len(token) % 4)
+                    title = base64.b64decode(token, validate=True).decode("utf-8")
+                except Exception:
+                    title = ""
+            if not title:
+                # Backward compatibility with older clients that send title directly.
+                title_values = query.get("title", [""])
+                title = title_values[0] if title_values else ""
+            title = safe_text(title, 140)
+            # Do not depend on a browser-supplied MIME header; uploads use mp4
+            # as a safe default when the request has no content-type header.
+            content_type = request.headers.get("content-type", "video/mp4")
             if not re.fullmatch(r"video/[A-Za-z0-9.+-]+", content_type):
                 content_type = "video/mp4"
 

@@ -389,11 +389,16 @@ $('#videoForm').addEventListener('submit', async event => {
   try {
     const videoTitle = String(form.get('title') || '').trim();
     const uploadUrl = new URL(API_BASE + '/api/admin/videos/' + encodeURIComponent(form.get('course_id')));
-    uploadUrl.searchParams.set('title', videoTitle);
-    const mimeType = /^video\/[A-Za-z0-9.+-]+$/.test(file.type) ? file.type : 'video/mp4';
+    // Keep all Arabic text out of HTTP headers. Base64url encodes the title
+    // as ASCII in the query string; the raw video remains the request body.
+    const titleBytes = new TextEncoder().encode(videoTitle);
+    let binaryTitle = '';
+    titleBytes.forEach(byte => { binaryTitle += String.fromCharCode(byte); });
+    const titleBase64Url = btoa(binaryTitle).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    uploadUrl.searchParams.set('title_b64', titleBase64Url);
     const response = await fetch(uploadUrl.toString(), {
       method: 'POST', credentials: 'include',
-      headers: {'content-type': mimeType},
+      // No custom headers: the Worker defaults the stored MIME type to video/mp4.
       body: file
     });
     let data = {};
