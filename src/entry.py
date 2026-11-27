@@ -215,6 +215,11 @@ class Default(WorkerEntrypoint):
             "CREATE INDEX IF NOT EXISTS idx_question_files_course "
             "ON question_files(course_id,created_at DESC)"
         ).run()
+        await self.env.DB.prepare(
+            "CREATE TABLE IF NOT EXISTS question_library_subjects ("
+            "id TEXT PRIMARY KEY,name TEXT NOT NULL COLLATE NOCASE UNIQUE,"
+            "created_by TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        ).run()
 
     async def api(self, request, path, method):
         # Health-check endpoint.
@@ -605,37 +610,55 @@ class Default(WorkerEntrypoint):
         # section; no paid-course enrollment is required for these user-uploaded files.
         if path == "/api/question-files" and method == "GET":
             await self.ensure_question_files_table()
+            # Both ordinary course subjects and independent question-library subjects
+            # are returned here. Independent subjects never enter the paid courses table.
             rows = await self.env.DB.prepare(
-                "SELECT c.id,c.name,c.specialization_id,s.name AS specialization_name,"
-                "COUNT(qf.id) AS file_count FROM courses c "
-                "JOIN specializations s ON s.id=c.specialization_id "
+                "SELECT c.id AS id,'course' AS source_type,c.name AS name,"
+                "s.name AS specialization_name,COUNT(qf.id) AS file_count "
+                "FROM courses c JOIN specializations s ON s.id=c.specialization_id "
                 "LEFT JOIN question_files qf ON qf.course_id=c.id "
-                "WHERE c.is_published=1 "
-                "GROUP BY c.id,c.name,c.specialization_id,s.name ORDER BY s.name,c.name"
+                "WHERE c.is_published=1 GROUP BY c.id,c.name,s.name "
+                "UNION ALL "
+                "SELECT 'library_' || l.id AS id,'library' AS source_type,l.name AS name,"
+                "'مادة خاصة بمكتبة الأسئلة' AS specialization_name,COUNT(qf.id) AS file_count "
+                "FROM question_library_subjects l "
+                "LEFT JOIN question_files qf ON qf.course_id='library:' || l.id "
+                "GROUP BY l.id,l.name ORDER BY name"
             ).all()
             return json_response({"items": rows.results})
 
         if path.startswith("/api/question-files/") and method == "GET":
             await self.ensure_question_files_table()
-            course_id = path.rsplit("/", 1)[-1]
-            course = await self.env.DB.prepare(
-                "SELECT id FROM courses WHERE id=? AND is_published=1"
-            ).bind(course_id).first()
-            if not course:
-                return json_response({"error": "المادة غير موجودة أو غير منشورة."}, 404)
+            subject_key = path.rsplit("/", 1)[-1]
+            if subject_key.startswith("library_"):
+                subject_id = subject_key[len("library_"):]
+                subject = await self.env.DB.prepare(
+                    "SELECT id FROM question_library_subjects WHERE id=?"
+                ).bind(subject_id).first()
+                if not subject:
+                    return json_response({"error": "المادة غير موجودة في مكتبة الأسئلة."}, 404)
+                stored_course_key = "library:" + subject_id
+            else:
+                course = await self.env.DB.prepare(
+                    "SELECT id FROM courses WHERE id=? AND is_published=1"
+                ).bind(subject_key).first()
+                if not course:
+                    return json_response({"error": "المادة غير موجودة أو غير منشورة."}, 404)
+                stored_course_key = subject_key
             rows = await self.env.DB.prepare(
                 "SELECT id,course_id,title,file_name,file_size,created_at "
                 "FROM question_files WHERE course_id=? ORDER BY created_at DESC"
-            ).bind(course_id).all()
+            ).bind(stored_course_key).all()
             return json_response({"items": rows.results})
 
         if path.startswith("/api/question-file/") and method == "GET":
             await self.ensure_question_files_table()
             file_id = path.rsplit("/", 1)[-1]
             row = await self.env.DB.prepare(
-                "SELECT q.object_key,q.file_name FROM question_files q "
-                "JOIN courses c ON c.id=q.course_id "
-                "WHERE q.id=? AND c.is_published=1"
+                "SELECT q.object_key,q.file_name,c.is_published,l.id AS library_subject_id "
+                "FROM question_files q LEFT JOIN courses c ON c.id=q.course_id "
+                "LEFT JOIN question_library_subjects l ON q.course_id='library:' || l.id "
+                "WHERE q.id=? AND (c.is_published=1 OR l.id IS NOT NULL)"
             ).bind(file_id).first()
             if not row:
                 return json_response({"error": "ملف الأسئلة غير موجود."}, 404)
@@ -843,13 +866,78 @@ class Default(WorkerEntrypoint):
 
     async def admin_api(self, request, path, method):
         # Admin-only PDF library operations. api() only calls admin_api after require_admin.
+        if path == "/api/admin/question-library-subjects" and method == "GET":
+            await self.ensure_question_files_table()
+            rows = await self.env.DB.prepare(
+                "SELECT l.id,l.name,l.created_at,COUNT(q.id) AS file_count "
+                "FROM question_library_subjects l LEFT JOIN question_files q "
+                "ON q.course_id='library:' || l.id GROUP BY l.id,l.name ORDER BY l.name"
+            ).all()
+            return json_response({"items": rows.results})
+
+        if path == "/api/admin/question-library-subjects" and method == "POST":
+            await self.ensure_question_files_table()
+            body = await parse_body(request)
+            name = safe_text(body.get("name"), 120)
+            if len(name) < 2:
+                return json_response({"error": "اكتب اسم المادة بشكل صحيح."}, 400)
+            existing = await self.env.DB.prepare(
+                "SELECT id FROM question_library_subjects WHERE lower(trim(name))=lower(trim(?)) LIMIT 1"
+            ).bind(name).first()
+            if existing:
+                return json_response({"error": "هذه المادة موجودة مسبقاً في مكتبة الأسئلة."}, 409)
+            existing_course = await self.env.DB.prepare(
+                "SELECT id FROM courses WHERE lower(trim(name))=lower(trim(?)) LIMIT 1"
+            ).bind(name).first()
+            if existing_course:
+                return json_response({"error": "هذه المادة موجودة ضمن المواد الأساسية. اختر إضافتها من قائمة المواد الموجودة."}, 409)
+            subject_id = secrets.token_urlsafe(12)
+            admin = await self.current_user(request)
+            try:
+                await self.env.DB.prepare(
+                    "INSERT INTO question_library_subjects(id,name,created_by) VALUES(?,?,?)"
+                ).bind(subject_id, name, admin["id"]).run()
+            except Exception as exc:
+                print("[SAEE_QUESTION_SUBJECT_CREATE_ERROR]", type(exc).__name__, str(exc))
+                return json_response({"error": "تعذر إضافة المادة. قد تكون مضافة مسبقاً."}, 409)
+            return json_response({"ok": True,"id": subject_id,"name": name}, 201)
+
+        if path.startswith("/api/admin/question-library-subjects/") and method == "DELETE":
+            await self.ensure_question_files_table()
+            subject_id = path.rsplit("/", 1)[-1]
+            subject = await self.env.DB.prepare(
+                "SELECT id FROM question_library_subjects WHERE id=?"
+            ).bind(subject_id).first()
+            if not subject:
+                return json_response({"error": "المادة غير موجودة."}, 404)
+            stored_key = "library:" + subject_id
+            objects = await self.env.DB.prepare(
+                "SELECT object_key FROM question_files WHERE course_id=?"
+            ).bind(stored_key).all()
+            for item in objects.results:
+                try:
+                    await self.env.MEDIA.delete(item["object_key"])
+                except Exception as exc:
+                    print("[SAEE_QUESTION_SUBJECT_R2_DELETE_ERROR]", type(exc).__name__, str(exc))
+                    return json_response({"error": "تعذر حذف أحد ملفات المادة من التخزين. لم يتم حذف المادة."}, 502)
+            await self.env.DB.prepare(
+                "DELETE FROM question_files WHERE course_id=?"
+            ).bind(stored_key).run()
+            await self.env.DB.prepare(
+                "DELETE FROM question_library_subjects WHERE id=?"
+            ).bind(subject_id).run()
+            return json_response({"ok": True})
+
         if path == "/api/admin/question-files" and method == "GET":
             await self.ensure_question_files_table()
             rows = await self.env.DB.prepare(
                 "SELECT q.id,q.course_id,q.title,q.file_name,q.file_size,q.created_at,"
-                "c.name AS course_name,s.name AS specialization_name "
-                "FROM question_files q JOIN courses c ON c.id=q.course_id "
-                "JOIN specializations s ON s.id=c.specialization_id ORDER BY q.created_at DESC"
+                "COALESCE(l.name,c.name) AS course_name,"
+                "CASE WHEN l.id IS NOT NULL THEN 'مكتبة الأسئلة فقط' ELSE s.name END AS specialization_name "
+                "FROM question_files q LEFT JOIN courses c ON c.id=q.course_id "
+                "LEFT JOIN specializations s ON s.id=c.specialization_id "
+                "LEFT JOIN question_library_subjects l ON q.course_id='library:' || l.id "
+                "WHERE c.id IS NOT NULL OR l.id IS NOT NULL ORDER BY q.created_at DESC"
             ).all()
             return json_response({"items": rows.results})
 
@@ -873,12 +961,24 @@ class Default(WorkerEntrypoint):
 
         if path.startswith("/api/admin/question-files/") and method == "POST":
             await self.ensure_question_files_table()
-            course_id = path.rsplit("/", 1)[-1]
-            course = await self.env.DB.prepare(
-                "SELECT id FROM courses WHERE id=?"
-            ).bind(course_id).first()
-            if not course:
-                return json_response({"error": "المادة المحددة غير موجودة."}, 404)
+            upload_target = path[len("/api/admin/question-files/"):]
+            if upload_target.startswith("library/"):
+                subject_id = upload_target.split("/", 1)[1]
+                subject = await self.env.DB.prepare(
+                    "SELECT id FROM question_library_subjects WHERE id=?"
+                ).bind(subject_id).first()
+                if not subject:
+                    return json_response({"error": "المادة غير موجودة في مكتبة الأسئلة فقط."}, 404)
+                course_id = "library:" + subject_id
+                storage_folder = "library_" + subject_id
+            else:
+                course_id = upload_target
+                course = await self.env.DB.prepare(
+                    "SELECT id FROM courses WHERE id=?"
+                ).bind(course_id).first()
+                if not course:
+                    return json_response({"error": "المادة المحددة غير موجودة."}, 404)
+                storage_folder = course_id
 
             query = parse_qs(urlsplit(request.url).query)
             title, file_name = "", ""
@@ -907,7 +1007,7 @@ class Default(WorkerEntrypoint):
                 return json_response({"error": "الملف المحدد ليس ملف PDF صالحاً."}, 415)
 
             file_id = secrets.token_urlsafe(16)
-            object_key = f"question-files/{course_id}/{file_id}.pdf"
+            object_key = f"question-files/{storage_folder}/{file_id}.pdf"
             try:
                 await self.env.MEDIA.put(
                     object_key, raw, httpMetadata={"contentType": "application/pdf"}

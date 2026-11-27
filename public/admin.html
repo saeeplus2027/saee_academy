@@ -88,9 +88,22 @@
 <section id="tab-question-files" class="admin-panel hidden">
       <h2>إدارة مكتبة الأسئلة</h2>
       <p class="muted">ارفع ملفات الأسئلة والامتحانات بصيغة PDF، وحدد التخصص والمادة التي تخصها. الحد الأقصى لحجم الملف 50 ميغابايت.</p>
+      <div class="question-library-subject-create">
+        <h3>إضافة مادة جديدة لمكتبة الأسئلة فقط</h3>
+        <p class="muted">هذه المادة لن تظهر في صفحة المواد والاشتراكات، وستظهر فقط داخل مكتبة الأسئلة.</p>
+        <form id="questionLibrarySubjectForm" class="admin-form">
+          <label>اسم المادة الجديدة<input name="name" required maxlength="120" placeholder="مثلاً: الثقافة الإسلامية"></label>
+          <button class="btn btn-primary">إضافة المادة للمكتبة فقط</button>
+          <div id="questionLibrarySubjectMessage" class="form-error wide"></div>
+        </form>
+        <div id="adminQuestionSubjectsList" class="management-list">جارٍ تحميل مواد المكتبة...</div>
+      </div>
+      <h3>رفع ملف PDF</h3>
       <form id="questionFileForm" class="admin-form">
-        <label>التخصص<select id="questionFileSpecialization" required></select></label>
-        <label>المادة<select name="course_id" id="questionFileCourse" required></select></label>
+        <label class="wide">نوع المادة<select id="questionFileTargetType" required><option value="course">مادة موجودة ضمن المواد والاشتراكات</option><option value="library">مادة خاصة بمكتبة الأسئلة فقط</option></select></label>
+        <label id="questionCourseSpecializationField">التخصص<select id="questionFileSpecialization"></select></label>
+        <label id="questionCourseField">المادة<select name="course_id" id="questionFileCourse"></select></label>
+        <label id="questionLibrarySubjectField" class="hidden wide">المادة الخاصة بالمكتبة<select id="questionLibrarySubject" name="library_subject_id"></select></label>
         <label>عنوان الملف<input name="title" required maxlength="140" placeholder="مثلاً: ميد 2025 أو فاينل 2024"></label>
         <label class="wide">ملف الأسئلة PDF<input name="file" type="file" accept=".pdf,application/pdf" required></label>
         <button class="btn btn-primary">رفع ملف PDF</button>

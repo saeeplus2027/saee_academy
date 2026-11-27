@@ -321,7 +321,7 @@ async function loadQuestionLibrary() {
           <span class="question-course-copy">
             <b>${escapeHtml(course.name)}</b>
             <small>${escapeHtml(course.specialization_name || 'بدون تخصص')}</small>
-            <strong>${Number(course.file_count || 0)} ملف PDF</strong>
+            <strong>${course.source_type === 'library' ? 'مادة خاصة بمكتبة الأسئلة' : 'مادة من المواد الأساسية'} · ${Number(course.file_count || 0)} ملف PDF</strong>
           </span>
           <span class="question-course-arrow">عرض الملفات ←</span>
         </button>
