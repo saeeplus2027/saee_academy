@@ -29,3 +29,15 @@
 }
 
 .question-library-subject-create{margin:18px 0 28px;padding:18px;background:#fbfcff;border:1px solid var(--line);border-radius:14px}.question-library-subject-create h3{font-size:15px;margin:0 0 6px}.question-library-subject-create>p{margin:0}.question-library-subject-create form{margin-top:12px}.question-library-subject-create .management-list{margin-top:15px}.question-admin-file-row{display:flex;justify-content:space-between;align-items:center;gap:14px}.question-admin-file-row>div{display:grid;gap:6px}.question-admin-file-row small{color:var(--muted);font-size:10px}.question-admin-file-row .btn{flex-shrink:0}@media(max-width:650px){.question-admin-file-row{align-items:flex-start;flex-direction:column}.question-admin-file-row .btn{width:100%}}
+
+
+/* Simplified question library admin: subjects first, PDFs after selecting a subject. */
+.question-library-added-subjects{margin-top:24px}
+.question-admin-subject-row{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.question-admin-subject-info{display:flex;flex-direction:column;gap:6px;min-width:0}
+.question-admin-subject-info small{color:var(--muted);font-size:11px}
+.question-subject-manager{margin-top:24px;padding:20px;background:#fbfcff;border:1px solid var(--line);border-radius:14px;scroll-margin-top:18px}
+.question-subject-manager h3,.question-subject-manager h4{margin:0 0 8px}
+.question-subject-manager>.muted{margin-top:0}
+.question-subject-manager .section-panel-title{margin-top:22px}
+@media(max-width:650px){.question-admin-subject-row{align-items:stretch;flex-direction:column}.question-admin-subject-row .management-actions{width:100%}.question-admin-subject-row .management-actions .btn{flex:1}.question-subject-manager{padding:14px}.question-subject-manager>.panel-title{align-items:flex-start;flex-direction:column}}

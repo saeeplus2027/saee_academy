@@ -625,19 +625,11 @@ class Default(WorkerEntrypoint):
             # Only subjects deliberately added from the question-library admin tab
             # are listed. Creating a regular course in the teaching area is not enough.
             rows = await self.env.DB.prepare(
-                "SELECT c.id AS id,'course' AS source_type,c.name AS name,"
-                "s.name AS specialization_name,COUNT(qf.id) AS file_count "
-                "FROM question_library_courses qlc "
-                "JOIN courses c ON c.id=qlc.course_id "
-                "JOIN specializations s ON s.id=c.specialization_id "
-                "LEFT JOIN question_files qf ON qf.course_id=c.id "
-                "WHERE c.is_published=1 GROUP BY c.id,c.name,s.name "
-                "UNION ALL "
                 "SELECT 'library_' || l.id AS id,'library' AS source_type,l.name AS name,"
-                "'مادة خاصة بمكتبة الأسئلة' AS specialization_name,COUNT(qf.id) AS file_count "
+                "'مادة ضمن مكتبة الأسئلة' AS specialization_name,COUNT(qf.id) AS file_count "
                 "FROM question_library_subjects l "
                 "LEFT JOIN question_files qf ON qf.course_id='library:' || l.id "
-                "GROUP BY l.id,l.name ORDER BY name"
+                "GROUP BY l.id,l.name ORDER BY l.name"
             ).all()
             return json_response({"items": rows.results})
 
@@ -928,11 +920,6 @@ class Default(WorkerEntrypoint):
             ).bind(name).first()
             if existing:
                 return json_response({"error": "هذه المادة موجودة مسبقاً في مكتبة الأسئلة."}, 409)
-            existing_course = await self.env.DB.prepare(
-                "SELECT id FROM courses WHERE lower(trim(name))=lower(trim(?)) LIMIT 1"
-            ).bind(name).first()
-            if existing_course:
-                return json_response({"error": "هذه المادة موجودة ضمن المواد الأساسية. اختر إضافتها من قائمة المواد الموجودة."}, 409)
             subject_id = secrets.token_urlsafe(12)
             admin = await self.current_user(request)
             try:

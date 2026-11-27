@@ -86,42 +86,49 @@
     </section>
 
 <section id="tab-question-files" class="admin-panel hidden">
-      <h2>إدارة مكتبة الأسئلة</h2>
-      <p class="muted">ارفع ملفات الأسئلة والامتحانات بصيغة PDF، وحدد التخصص والمادة التي تخصها. الحد الأقصى لحجم الملف 50 ميغابايت.</p>
-      <div class="question-library-subject-create">
-        <h3>إضافة مادة جديدة لمكتبة الأسئلة فقط</h3>
-        <p class="muted">هذه المادة تظهر في مكتبة الأسئلة فقط، ولا تُضاف إلى صفحة شرح المواد أو الاشتراكات.</p>
+      <div class="panel-title">
+        <div><h2>مكتبة الأسئلة</h2><p class="muted">أضف المواد التي تريد ظهورها في مكتبة الأسئلة فقط.</p></div>
+        <button id="refreshQuestionSubjects" class="btn btn-outline" type="button">تحديث المواد</button>
+      </div>
+
+      <section class="question-library-subject-create">
+        <h3>إضافة مادة جديدة</h3>
+        <p class="muted">اكتب اسم المادة فقط. ستظهر في مكتبة الأسئلة ولن تُضاف إلى صفحة شرح المواد أو الاشتراكات.</p>
         <form id="questionLibrarySubjectForm" class="admin-form">
-          <label>اسم المادة الجديدة<input name="name" required maxlength="120" placeholder="مثلاً: الثقافة الإسلامية"></label>
-          <button class="btn btn-primary">إضافة المادة للمكتبة فقط</button>
+          <label>اسم المادة<input name="name" required maxlength="120" placeholder="مثلاً: الثقافة الإسلامية"></label>
+          <button class="btn btn-primary" type="submit">إضافة المادة</button>
           <div id="questionLibrarySubjectMessage" class="form-error wide"></div>
         </form>
-        <div id="adminQuestionSubjectsList" class="management-list">جارٍ تحميل مواد المكتبة...</div>
-        <div class="question-library-existing-subjects">
-          <h3>إضافة مادة موجودة ضمن مواد الاشتراك إلى مكتبة الأسئلة</h3>
-          <p class="muted">وجود المادة في صفحة شرح المواد لا يجعلها تظهر هنا. يجب إضافتها من هذا القسم بشكل صريح.</p>
-          <div class="admin-form">
-            <label>التخصص<select id="questionLibraryCourseSpecialization"></select></label>
-            <label>المادة<select id="questionLibraryCourseSelect"></select></label>
-            <button type="button" class="btn btn-primary" id="addQuestionCourseToLibrary">إضافة المادة إلى مكتبة الأسئلة فقط</button>
-            <div id="questionLibraryCourseMessage" class="form-error wide"></div>
-          </div>
-          <div id="adminQuestionCoursesList" class="management-list">جارٍ تحميل المواد المضافة...</div>
+      </section>
+
+      <section class="question-library-added-subjects">
+        <div class="panel-title"><h3>المواد المضافة</h3></div>
+        <div id="adminQuestionSubjectsList" class="management-list">
+          جارٍ تحميل المواد المضافة...
         </div>
-      </div>
-      <h3>رفع ملف PDF</h3>
-      <form id="questionFileForm" class="admin-form">
-        <label class="wide">نوع المادة<select id="questionFileTargetType" required><option value="course">مادة موجودة ضمن المواد والاشتراكات (من هنا فقط تُضاف للمكتبة)</option><option value="library">مادة خاصة بمكتبة الأسئلة فقط</option></select></label>
-        <label id="questionCourseSpecializationField">التخصص<select id="questionFileSpecialization"></select></label>
-        <label id="questionCourseField">المادة<select name="course_id" id="questionFileCourse"></select></label>
-        <label id="questionLibrarySubjectField" class="hidden wide">المادة الخاصة بالمكتبة<select id="questionLibrarySubject" name="library_subject_id"></select></label>
-        <label>عنوان الملف<input name="title" required maxlength="140" placeholder="مثلاً: ميد 2025 أو فاينل 2024"></label>
-        <label class="wide">ملف الأسئلة PDF<input name="file" type="file" accept=".pdf,application/pdf" required></label>
-        <button class="btn btn-primary">رفع ملف PDF</button>
-        <div id="questionFileMessage" class="form-error wide"></div>
-      </form>
-      <div class="panel-title section-panel-title"><h2>الملفات المضافة</h2><button id="refreshQuestionFiles" class="btn btn-outline">تحديث</button></div>
-      <div id="adminQuestionFilesList" class="management-list">جارٍ تحميل الملفات...</div>
+      </section>
+
+      <section id="questionSubjectManager" class="question-subject-manager hidden">
+        <div class="panel-title">
+          <div><span class="eyebrow">إدارة المادة</span><h3 id="questionSubjectManagerName">اسم المادة</h3></div>
+          <button id="closeQuestionSubjectManager" class="btn btn-outline" type="button">العودة إلى المواد</button>
+        </div>
+        <h4>إضافة ملف PDF</h4>
+        <p class="muted">اختر عنوان الملف وحدد ملف PDF فقط.</p>
+        <form id="questionFileForm" class="admin-form">
+          <label>عنوان الملف<input name="title" required maxlength="140" placeholder="مثلاً: ميد أول أو فاينل 2026"></label>
+          <label class="wide">ملف PDF<input name="file" type="file" accept=".pdf,application/pdf" required></label>
+          <button class="btn btn-primary" type="submit">إضافة ملف PDF</button>
+          <div id="questionFileMessage" class="form-error wide"></div>
+        </form>
+        <div class="panel-title section-panel-title">
+          <h4>الملفات المضافة لهذه المادة</h4>
+          <button id="refreshQuestionFiles" class="btn btn-outline" type="button">تحديث الملفات</button>
+        </div>
+        <div id="adminQuestionFilesList" class="management-list">
+          اختر مادة لعرض ملفاتها.
+        </div>
+      </section>
     </section>
 
         <section id="tab-users" class="admin-panel hidden">
