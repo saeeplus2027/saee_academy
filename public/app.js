@@ -1,6 +1,7 @@
 const $=s=>document.querySelector(s);let currentUser=null,courses=[],specializations=[],selectedCourse=null,authMode='login';
 $('#year').textContent=new Date().getFullYear();
-async function api(path,opts={}){const res=await fetch(path,{credentials:'same-origin',...opts,headers:{...(opts.body&&!(opts.body instanceof ArrayBuffer)?{'content-type':'application/json'}:{}),...(opts.headers||{})}});let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.error||'تعذر تنفيذ الطلب.');return data}
+const API_BASE=(window.SAEE_API_BASE||'').replace(/\/$/,'');
+async function api(path,opts={}){const res=await fetch(API_BASE+path,{credentials:'include',...opts,headers:{...(opts.body&&!(opts.body instanceof ArrayBuffer)?{'content-type':'application/json'}:{}),...(opts.headers||{})}});let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.error||'تعذر تنفيذ الطلب.');return data}
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2800)}
 function openAuth(mode='login'){authMode=mode;$('#authModal').classList.remove('hidden');renderAuth()}
 function closeModals(){$$('.modal').forEach(x=>x.classList.add('hidden'))}function $$(s){return [...document.querySelectorAll(s)]}

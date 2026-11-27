@@ -61,17 +61,25 @@ class Default(WorkerEntrypoint):
             method = request.method.upper()
 
             if path.startswith("/api/"):
+                origin = request.headers.get("origin", "")
+                allowed_origin = "https://saeeplus2027.github.io"
+                cors = {}
+                if origin == allowed_origin:
+                    cors = {
+                        "access-control-allow-origin": allowed_origin,
+                        "access-control-allow-credentials": "true",
+                        "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+                        "access-control-allow-headers": "content-type,x-video-title",
+                        "vary": "Origin",
+                    }
                 if method == "OPTIONS":
-                    return Response(
-                        "",
-                        status=204,
-                        headers={
-                            "access-control-allow-origin": "",
-                            "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-                            "access-control-allow-headers": "content-type",
-                        },
-                    )
-                return await self.api(request, path, method)
+                    if not cors:
+                        return Response("", status=403)
+                    return Response("", status=204, headers=cors)
+                result = await self.api(request, path, method)
+                headers = dict(result.headers)
+                headers.update(cors)
+                return Response(result.body, status=result.status, headers=headers)
 
             # Static frontend. Assets binding is configured in wrangler.toml.
             return await self.env.ASSETS.fetch(request)
@@ -257,7 +265,7 @@ class Default(WorkerEntrypoint):
                 headers={
                     "set-cookie": (
                         f"saee_session={token}; HttpOnly; Secure; "
-                        f"SameSite=Lax; Path=/; Max-Age={SESSION_DAYS * 86400}"
+                        f"SameSite=None; Path=/; Max-Age={SESSION_DAYS * 86400}"
                     )
                 },
             )
@@ -274,7 +282,7 @@ class Default(WorkerEntrypoint):
                 headers={
                     "set-cookie": (
                         "saee_session=; HttpOnly; Secure; "
-                        "SameSite=Lax; Path=/; Max-Age=0"
+                        "SameSite=None; Path=/; Max-Age=0"
                     )
                 },
             )
