@@ -55,27 +55,35 @@ def safe_text(value, max_len=200):
 
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
-        try:
-            # Use the URL path only; request.url also contains scheme and hostname.
-            path = urlsplit(request.url).path
-            method = request.method.upper()
+        # CORS headers are also attached to error responses; otherwise the
+        # browser hides the real API error and reports only "Failed to fetch".
+        path = urlsplit(request.url).path
+        method = request.method.upper()
+        origin = request.headers.get("origin", "")
+        allowed_origins = {
+            "https://saeeplus2027.github.io",
+            "http://localhost:8787",
+            "http://127.0.0.1:8787",
+        }
+        allowed_origin = origin if origin in allowed_origins else ""
+        cors = {}
+        if path.startswith("/api/") and allowed_origin:
+            cors = {
+                "access-control-allow-origin": allowed_origin,
+                "access-control-allow-credentials": "true",
+                "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+                "access-control-allow-headers": "content-type,x-video-title,x-bootstrap-key",
+                "access-control-max-age": "86400",
+                "vary": "Origin",
+            }
 
+        if path.startswith("/api/") and method == "OPTIONS":
+            if not cors:
+                return Response("Origin not allowed", status=403)
+            return Response("", status=204, headers=cors)
+
+        try:
             if path.startswith("/api/"):
-                origin = request.headers.get("origin", "")
-                allowed_origin = "https://saeeplus2027.github.io"
-                cors = {}
-                if origin == allowed_origin:
-                    cors = {
-                        "access-control-allow-origin": allowed_origin,
-                        "access-control-allow-credentials": "true",
-                        "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-                        "access-control-allow-headers": "content-type,x-video-title",
-                        "vary": "Origin",
-                    }
-                if method == "OPTIONS":
-                    if not cors:
-                        return Response("", status=403)
-                    return Response("", status=204, headers=cors)
                 result = await self.api(request, path, method)
                 headers = dict(result.headers)
                 headers.update(cors)
@@ -83,10 +91,12 @@ class Default(WorkerEntrypoint):
 
             # Static frontend. Assets binding is configured in wrangler.toml.
             return await self.env.ASSETS.fetch(request)
-        except Exception:
-            return json_response(
-                {"error": "حدث خطأ داخلي. حاول مرة أخرى."}, 500
+        except Exception as exc:
+            error = json_response(
+                {"error": "خطأ في الخادم: " + str(exc)[:240]}, 500,
+                headers=cors,
             )
+            return error
 
     async def current_user(self, request):
         token = cookie_value(request, "saee_session")
