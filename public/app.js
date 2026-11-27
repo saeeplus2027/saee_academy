@@ -179,6 +179,7 @@ function setupSharedControls() {
 
   document.addEventListener('click', event => {
     if (!event.target.closest('.profile-area')) closeProfileDropdown();
+    if (event.target.closest('#courseEnrollButton')) requestEnrollment();
   });
   $$('[data-close="1"]').forEach(element => element.addEventListener('click', closeModals));
 
@@ -570,6 +571,10 @@ async function loadCourseDetail() {
           <a class="btn btn-primary btn-lg course-content-jump" href="#courseContent">عرض محتوى المادة</a>
         ` : `
           ${enrollmentStatusMarkup(c.id)}
+          <div class="course-enrollment-actions">
+            ${enrollmentActionMarkup(c.id)}
+            <div id="courseEnrollMessage" class="form-error" role="status" aria-live="polite"></div>
+          </div>
           ${await getSubscriptionContactMarkup()}
         `}
         <a class="text-link" href="courses.html">العودة إلى المواد</a>
@@ -718,7 +723,7 @@ async function requestEnrollment() {
   const button = $('#courseEnrollButton');
   const message = $('#courseEnrollMessage');
   button.disabled = true;
-  message.textContent = '';
+  if (message) message.textContent = '';
   try {
     const result = await api('/api/enrollments', {
       method: 'POST',
@@ -735,16 +740,16 @@ async function requestEnrollment() {
       await loadCourseDetail();
       const current = getEnrollmentState(selectedCourse.id);
       if (current && ['pending', 'approved', 'expired', 'rejected'].includes(current.display_status)) {
-        message.textContent = current.display_status === 'approved'
+        if (message) message.textContent = current.display_status === 'approved'
           ? 'تم قبول اشتراكك بالفعل.'
           : current.display_status === 'pending'
             ? 'طلبك ما زال قيد المراجعة.'
             : error.message;
       } else {
-        message.textContent = error.message;
+        if (message) message.textContent = error.message;
       }
     } catch {
-      message.textContent = error.message;
+      if (message) message.textContent = error.message;
     }
   } finally {
     if ($('#courseEnrollButton')) $('#courseEnrollButton').disabled = false;
