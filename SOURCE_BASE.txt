@@ -1,0 +1,7 @@
+Repository: saeeplus2027/saee_academy
+Branch: main
+Latest main inspected: 2405be1681c94deb4e2b1780eb5072c80800c32a
+Public build source commit: 15f1e7d052241eba3adcc0492174b6e517af57a8
+Successful GitHub Pages run: 46063678314
+The only later commit difference is README_AR.txt; public files and src/entry.py matched the Pages build base.
+The public folder in this package is a verified snapshot of that Pages artifact, plus only the question-library changes.
