@@ -684,7 +684,12 @@ function selectCourseVideo(videoId, autoplay = true) {
   player.onerror = () => {
     if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'تعذر تشغيل الفيديو. حدّث الصفحة أو تواصل مع الإدارة.';
   };
-  player.src = `${API_BASE}/api/watch/${encodeURIComponent(videoId)}`;
+  // A <video> element cannot send our Bearer header. Pass the current
+  // session token only to this authenticated media endpoint.
+  const mediaToken = localStorage.getItem(AUTH_TOKEN_KEY) || '';
+  const mediaUrl = new URL(`${API_BASE}/api/watch/${encodeURIComponent(videoId)}`);
+  if (mediaToken) mediaUrl.searchParams.set('session', mediaToken);
+  player.src = mediaUrl.toString();
   player.load();
   if (autoplay) {
     const playPromise = player.play();

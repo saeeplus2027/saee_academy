@@ -9,6 +9,8 @@ let selectedQuestionLibrarySubjectId = '';
 
 async function api(path, options = {}) {
   if (!API_BASE) throw new Error('إعداد عنوان الخادم غير موجود.');
+  // The public site and admin page share this origin and therefore share
+  // the same localStorage session token after the user signs in.
   const savedToken = localStorage.getItem(AUTH_TOKEN_KEY);
   const headers = {
     ...(savedToken ? {authorization: `Bearer ${savedToken}`} : {}),

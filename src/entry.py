@@ -174,6 +174,13 @@ class Default(WorkerEntrypoint):
         token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
         if not token:
             token = cookie_value(request, "saee_session")
+        # Native HTML media elements cannot attach an Authorization header.
+        # For the protected video stream only, accept the existing session
+        # token in the query string so <video src> can authenticate cross-origin.
+        if not token and urlsplit(request.url).path.startswith("/api/watch/"):
+            query = parse_qs(urlsplit(request.url).query)
+            token_values = query.get("session", [])
+            token = token_values[0] if token_values else ""
         if not token:
             return None
 
