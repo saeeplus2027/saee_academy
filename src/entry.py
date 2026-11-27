@@ -1081,7 +1081,7 @@ class Default(WorkerEntrypoint):
                     {"error": "أرسل ملف فيديو وعنواناً صالحاً."}, 400
                 )
 
-            raw = await request.arrayBuffer()
+            raw = await request.bytes()
             if len(raw) > 500 * 1024 * 1024:
                 return json_response(
                     {"error": "حجم الفيديو يتجاوز 500 ميغابايت."}, 413
@@ -1090,18 +1090,39 @@ class Default(WorkerEntrypoint):
             vid = secrets.token_urlsafe(12)
             key = f"courses/{course_id}/{vid}"
 
-            await self.env.MEDIA.put(
-                key, raw, httpMetadata={"contentType": content_type}
-            )
+            try:
+                # workers.Request exposes bytes() in the Python Workers SDK;
+                # calling the JavaScript arrayBuffer() method on the wrapper
+                # raises an internal server error before the upload reaches R2.
+                await self.env.MEDIA.put(
+                    key, raw, httpMetadata={"contentType": content_type}
+                )
+            except Exception as exc:
+                print("[SAEE_VIDEO_R2_UPLOAD_ERROR]", type(exc).__name__, str(exc))
+                return json_response(
+                    {"error": "تعذر تخزين الفيديو. تحقق من اتصال R2 وحجم الملف ثم حاول مجدداً."},
+                    502,
+                )
 
             last_position = await self.env.DB.prepare(
                 "SELECT COALESCE(MAX(position),0) AS n FROM videos WHERE course_id=?"
             ).bind(course_id).first()
             position = (last_position["n"] if last_position else 0) + 1
-            await self.env.DB.prepare(
-                "INSERT INTO videos"
-                "(id,course_id,title,object_key,position) VALUES(?,?,?,?,?)"
-            ).bind(vid, course_id, title, key, position).run()
+            try:
+                await self.env.DB.prepare(
+                    "INSERT INTO videos"
+                    "(id,course_id,title,object_key,position) VALUES(?,?,?,?,?)"
+                ).bind(vid, course_id, title, key, position).run()
+            except Exception as exc:
+                print("[SAEE_VIDEO_D1_INSERT_ERROR]", type(exc).__name__, str(exc))
+                try:
+                    await self.env.MEDIA.delete(key)
+                except Exception as cleanup_exc:
+                    print("[SAEE_VIDEO_R2_CLEANUP_WARNING]", type(cleanup_exc).__name__, str(cleanup_exc))
+                return json_response(
+                    {"error": "تم رفع الملف إلى التخزين لكن تعذر تسجيله في قاعدة البيانات. راجع سجلات Worker."},
+                    500,
+                )
 
             return json_response(
                 {"ok": True, "id": vid, "position": position}, 201

@@ -151,7 +151,8 @@ $('#specializationForm').addEventListener('submit', async event => {
   try {
     await api('/api/admin/specializations', {method: 'POST', body: JSON.stringify(body)});
     event.currentTarget.reset();
-    message('#specializationMessage', 'تمت إضافة التخصص.');
+    message('#specializationMessage', 'تمت إضافة التخصص بنجاح.');
+    toast('تمت إضافة التخصص بنجاح.');
     await loadSpecializations();
     await loadCourses();
   } catch (error) {
@@ -261,7 +262,8 @@ $('#courseForm').addEventListener('submit', async event => {
   try {
     await api('/api/admin/courses', {method: 'POST', body: JSON.stringify(body)});
     event.currentTarget.reset();
-    message('#courseMessage', 'تمت إضافة المادة.');
+    message('#courseMessage', 'تمت إضافة المادة بنجاح.');
+    toast('تمت إضافة المادة بنجاح.');
     await loadCourses();
   } catch (error) {
     message('#courseMessage', error.message);
@@ -405,6 +407,7 @@ $('#videoForm').addEventListener('submit', async event => {
     try { data = await response.json(); } catch {}
     if (!response.ok) throw new Error(data.error || 'تعذر رفع الفيديو.');
     message('#videoMessage', `تم رفع الفيديو بنجاح. ترتيبه: ${data.position}.`);
+    toast('تم رفع الفيديو بنجاح.');
     event.currentTarget.reset();
     await loadVideos();
     await loadCourses();
