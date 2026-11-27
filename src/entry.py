@@ -761,12 +761,18 @@ class Default(WorkerEntrypoint):
             description = safe_text(body.get("description"), 500)
             if len(name) < 2:
                 return json_response({"error": "اسم التخصص مطلوب."}, 400)
+            duplicate = await self.env.DB.prepare(
+                "SELECT id FROM specializations WHERE lower(trim(name))=lower(trim(?)) AND id<>? LIMIT 1"
+            ).bind(name, sid).first()
+            if duplicate:
+                return json_response({"error": "اسم التخصص مستخدم بالفعل."}, 409)
             try:
                 result = await self.env.DB.prepare(
                     "UPDATE specializations SET name=?,description=? WHERE id=?"
                 ).bind(name, description, sid).run()
-            except Exception:
-                return json_response({"error": "اسم التخصص مستخدم بالفعل."}, 409)
+            except Exception as exc:
+                print("[SAEE_SPECIALIZATION_UPDATE_ERROR]", type(exc).__name__, str(exc))
+                return json_response({"error": "تعذر تحديث التخصص بسبب خطأ في قاعدة البيانات."}, 500)
             return json_response({"ok": True})
 
         if path.startswith("/api/admin/specializations/") and method == "DELETE":
@@ -901,16 +907,23 @@ class Default(WorkerEntrypoint):
             if len(name) < 2:
                 return json_response({"error": "اسم التخصص مطلوب."}, 400)
 
+            # Compare normalized names so whitespace/case variants are not
+            # mistaken for new specializations. Do not mask unrelated DB errors.
+            duplicate = await self.env.DB.prepare(
+                "SELECT id FROM specializations WHERE lower(trim(name))=lower(trim(?)) LIMIT 1"
+            ).bind(name).first()
+            if duplicate:
+                return json_response({"error": "هذا التخصص موجود بالفعل."}, 409)
+
             sid = secrets.token_urlsafe(12)
             try:
                 await self.env.DB.prepare(
                     "INSERT INTO specializations(id,name,description) "
                     "VALUES(?,?,?)"
                 ).bind(sid, name, desc).run()
-            except Exception:
-                return json_response(
-                    {"error": "التخصص موجود مسبقاً."}, 409
-                )
+            except Exception as exc:
+                print("[SAEE_SPECIALIZATION_CREATE_ERROR]", type(exc).__name__, str(exc))
+                return json_response({"error": "تعذر إضافة التخصص بسبب خطأ في قاعدة البيانات."}, 500)
 
             return json_response({"ok": True, "id": sid}, 201)
 
