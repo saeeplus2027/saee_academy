@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "سعي أكاديمي"
+description = "منصة عربية لشرح مواد الجامعة. يتصفح الطلاب المواد حسب التخصص ويطلبون الاشتراك، بينما يدير المشرف المواد والفيديوهات وطلبات الاشتراك من لوحة خاصة. الدفع يتم بالتواصل خارج الموقع."
+version = "1.0.0"
+id = "artifacts/sai-academy"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22329
+
+[services.development]
+run = "pnpm --filter @workspace/sai-academy run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/sai-academy", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/sai-academy/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22329"
+BASE_PATH = "/"

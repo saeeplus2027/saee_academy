@@ -1,7 +1,0 @@
-User-agent: *
-Allow: /
-Disallow: /admin.html
-Disallow: /api/
-
-# استبدل YOUR-DOMAIN.com بالدومين الحقيقي بعد شرائه
-Sitemap: https://YOUR-DOMAIN.com/sitemap.xml
