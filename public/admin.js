@@ -1,7 +1,6 @@
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const API_BASE = (window.SAEE_API_BASE || '').replace(/\/$/, '');
-const AUTH_TOKEN_KEY = 'saee_academy_session_token';
 let adminUser = null;
 let adminCourses = [];
 let adminSpecializations = [];
@@ -9,29 +8,19 @@ let selectedQuestionLibrarySubjectId = '';
 
 async function api(path, options = {}) {
   if (!API_BASE) throw new Error('إعداد عنوان الخادم غير موجود.');
-  // The public site and admin page share this origin and therefore share
-  // the same localStorage session token after the user signs in.
-  const savedToken = localStorage.getItem(AUTH_TOKEN_KEY);
   const headers = {
-    ...(savedToken ? {authorization: `Bearer ${savedToken}`} : {}),
     ...(options.body && typeof options.body === 'string' ? {'content-type': 'application/json'} : {}),
     ...(options.headers || {})
   };
   let response;
   try {
-    // Admin authentication uses the explicit Bearer token; do not depend on
-    // third-party cookies between GitHub Pages and workers.dev.
-    response = await fetch(API_BASE + path, {credentials: 'omit', ...options, headers});
+    response = await fetch(API_BASE + path, {credentials: 'include', ...options, headers});
   } catch {
     throw new Error('تعذر الاتصال بخادم سعي أكاديمي.');
   }
   let data = {};
   try { data = await response.json(); } catch {}
   if (!response.ok) throw new Error(data.error || 'حدث خطأ غير متوقع.');
-  if (data.session_token) {
-    try { localStorage.setItem(AUTH_TOKEN_KEY, data.session_token); }
-    catch { throw new Error('تعذر حفظ جلسة الدخول في المتصفح. فعّل التخزين المحلي ثم أعد المحاولة.'); }
-  }
   return data;
 }
 
@@ -80,12 +69,9 @@ $('#adminLoginForm').addEventListener('submit', async event => {
   button.disabled = true;
   message('#loginError', '');
   try {
-    // Login returns the bearer token. api() persists it before the protected
-    // /me request, so the admin check always uses the newly issued session.
-    const loginResult = await api('/api/auth/login', {method: 'POST', body: JSON.stringify(body)});
-    if (!loginResult.session_token) throw new Error('تم قبول بيانات الدخول لكن الخادم لم يُرجع رمز الجلسة.');
+    await api('/api/auth/login', {method: 'POST', body: JSON.stringify(body)});
     const result = await api('/api/auth/me');
-    if (String(result.user?.role || '').trim().toLowerCase() !== 'admin') {
+    if (result.user?.role !== 'admin') {
       await api('/api/auth/logout', {method: 'POST'});
       throw new Error('هذا الحساب ليس حساب أدمن.');
     }
@@ -100,7 +86,6 @@ $('#adminLoginForm').addEventListener('submit', async event => {
 
 $('#adminLogout').addEventListener('click', async () => {
   try { await api('/api/auth/logout', {method: 'POST'}); } catch {}
-  localStorage.removeItem(AUTH_TOKEN_KEY);
   location.href = 'index.html';
 });
 

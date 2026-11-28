@@ -122,8 +122,9 @@ class Default(WorkerEntrypoint):
                 cors = {
                     "access-control-allow-origin": origin,
                     "access-control-allow-credentials": "true",
-                    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-                    "access-control-allow-headers": "content-type,authorization,x-video-title,x-bootstrap-key",
+                    "access-control-allow-methods": "GET,HEAD,POST,PUT,DELETE,OPTIONS",
+                    "access-control-allow-headers": "content-type,range,if-range,x-video-title,x-bootstrap-key",
+                    "access-control-expose-headers": "accept-ranges,content-range,content-length,etag",
                     "access-control-max-age": "86400",
                     "vary": "Origin",
                 }
@@ -168,19 +169,7 @@ class Default(WorkerEntrypoint):
         ).run()
 
     async def current_user(self, request):
-        # GitHub Pages and workers.dev are different sites; browsers may block
-        # the cross-site session cookie. Prefer an explicit bearer token.
-        authorization = request.headers.get("authorization", "")
-        token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
-        if not token:
-            token = cookie_value(request, "saee_session")
-        # Native HTML media elements cannot attach an Authorization header.
-        # For the protected video stream only, accept the existing session
-        # token in the query string so <video src> can authenticate cross-origin.
-        if not token and urlsplit(request.url).path.startswith("/api/watch/"):
-            query = parse_qs(urlsplit(request.url).query)
-            token_values = query.get("session", [])
-            token = token_values[0] if token_values else ""
+        token = cookie_value(request, "saee_session")
         if not token:
             return None
 
@@ -448,7 +437,7 @@ class Default(WorkerEntrypoint):
                     500,
                 )
             return json_response(
-                {"ok": True, "session_token": token, "message": "تم إنشاء الحساب وتسجيل دخولك بنجاح."},
+                {"ok": True, "message": "تم إنشاء الحساب وتسجيل دخولك بنجاح."},
                 201,
                 headers={
                     "set-cookie": (
@@ -495,7 +484,7 @@ class Default(WorkerEntrypoint):
             ).bind(token_digest(token), row["id"], expires).run()
 
             return json_response(
-                {"ok": True, "session_token": token},
+                {"ok": True},
                 headers={
                     "set-cookie": (
                         f"saee_session={token}; HttpOnly; Secure; "
@@ -505,10 +494,7 @@ class Default(WorkerEntrypoint):
             )
 
         if path == "/api/auth/logout" and method == "POST":
-            authorization = request.headers.get("authorization", "")
-            token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
-            if not token:
-                token = cookie_value(request, "saee_session")
+            token = cookie_value(request, "saee_session")
             if token:
                 await self.env.DB.prepare(
                     "DELETE FROM sessions WHERE token_hash=?"
@@ -840,66 +826,99 @@ class Default(WorkerEntrypoint):
             ).bind(user["id"], video_id).run()
             return json_response({"ok": True, "completed": True})
 
-        if path.startswith("/api/watch/") and method == "GET":
+        if path.startswith("/api/watch/") and method in ("GET", "HEAD"):
             video_id = path.rsplit("/", 1)[-1]
             access = await self.env.DB.prepare(
                 "SELECT v.object_key,v.title FROM videos v "
                 "JOIN enrollment_requests e ON e.course_id=v.course_id "
                 "WHERE v.id=? AND e.student_id=? AND e.status='approved' "
-                "AND e.expires_at>?"
+                "AND e.expires_at>? LIMIT 1"
             ).bind(
                 video_id, user["id"], datetime.now(timezone.utc).isoformat()
             ).first()
 
             if not access:
                 return json_response(
-                    {
-                        "error": (
-                            "لا تملك صلاحية مشاهدة هذا الفيديو "
-                            "أو انتهى اشتراكك."
-                        )
-                    },
+                    {"error": "لا تملك صلاحية مشاهدة هذا الفيديو أو انتهى اشتراكك."},
                     403,
                 )
 
-            # Pass the incoming Range header to R2. Native HTML video players
-            # request byte ranges (often starting with bytes=0-); returning the
-            # complete object with status 200 can leave playback stuck at 0:00.
-            range_header = request.headers.get("range", "")
-            obj = await self.env.MEDIA.get(
-                access["object_key"],
-                range=request.headers,
-            )
-            if not obj:
-                return json_response({"error": "الفيديو غير موجود."}, 404)
+            # Stream the MP4 directly from R2 and honor the browser's byte-range
+            # requests. Native video players (especially Safari/iOS and some
+            # Android browsers) rely on 206 + Content-Range while loading/seek.
+            range_header = request.headers.get("range", "").strip()
+            requested_range = None
+            range_start = range_end = None
 
-            headers = {
-                "content-type": (
-                    (obj.httpMetadata.contentType if obj.httpMetadata else None)
-                    or "video/mp4"
-                ),
-                "cache-control": "private, no-store",
+            try:
+                # Check the object's real size before asking R2 for a partial
+                # read, so invalid or unsatisfiable ranges get a clean HTTP 416.
+                if range_header:
+                    metadata = await self.env.MEDIA.head(access["object_key"])
+                    if not metadata:
+                        return json_response({"error": "الفيديو غير موجود في مساحة التخزين."}, 404)
+                    total_size = int(metadata.size)
+
+                    match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
+                    if not match or (not match.group(1) and not match.group(2)):
+                        return Response("", status=416, headers={
+                            "accept-ranges": "bytes",
+                            "content-range": f"bytes */{total_size}",
+                        })
+                    first, last = match.group(1), match.group(2)
+                    if first:
+                        range_start = int(first)
+                        range_end = min(int(last), total_size - 1) if last else total_size - 1
+                    else:
+                        suffix_length = int(last)
+                        if suffix_length <= 0:
+                            return Response("", status=416, headers={
+                                "accept-ranges": "bytes",
+                                "content-range": f"bytes */{total_size}",
+                            })
+                        range_start = max(total_size - suffix_length, 0)
+                        range_end = total_size - 1
+
+                    if total_size <= 0 or range_start >= total_size or range_end < range_start:
+                        return Response("", status=416, headers={
+                            "accept-ranges": "bytes",
+                            "content-range": f"bytes */{total_size}",
+                        })
+                    requested_range = True
+                    obj = await self.env.MEDIA.get(access["object_key"], range=request.headers)
+                else:
+                    obj = await self.env.MEDIA.get(access["object_key"])
+                    if not obj:
+                        return json_response({"error": "الفيديو غير موجود في مساحة التخزين."}, 404)
+                    total_size = int(obj.size)
+            except Exception as exc:
+                print("[SAEE_VIDEO_R2_READ_ERROR]", type(exc).__name__, str(exc))
+                return json_response({"error": "تعذر قراءة الفيديو من مساحة التخزين."}, 502)
+
+            if not obj or not hasattr(obj, "body"):
+                return json_response({"error": "تعذر تجهيز بث الفيديو من التخزين."}, 502)
+
+            status = 206 if requested_range else 200
+            response_length = (range_end - range_start + 1) if requested_range else total_size
+            content_type = getattr(getattr(obj, "httpMetadata", None), "contentType", None) or "video/mp4"
+            if not content_type.lower().startswith("video/"):
+                content_type = "video/mp4"
+            response_headers = {
+                "content-type": content_type,
+                "accept-ranges": "bytes",
+                "content-length": str(response_length),
+                "cache-control": "private, no-store, no-transform",
                 "content-disposition": "inline",
                 "x-content-type-options": "nosniff",
-                "accept-ranges": "bytes",
             }
-            status = 200
-            if range_header and getattr(obj, "range", None):
-                # R2 returns the selected range metadata after honoring the
-                # request's Range header. Reflect it as a standards-compliant
-                # 206 Partial Content response for the browser media element.
-                selected = obj.range
-                start = int(selected.offset)
-                length = int(selected.length)
-                total = int(obj.size)
-                end = start + length - 1
-                headers["content-range"] = f"bytes {start}-{end}/{total}"
-                headers["content-length"] = str(length)
-                status = 206
-            else:
-                headers["content-length"] = str(int(obj.size))
+            etag = getattr(obj, "httpEtag", None)
+            if etag:
+                response_headers["etag"] = etag
+            if requested_range:
+                response_headers["content-range"] = f"bytes {range_start}-{range_end}/{total_size}"
 
-            return Response(obj.body, status=status, headers=headers)
+            body = None if method == "HEAD" else obj.body
+            return Response(body, status=status, headers=response_headers)
 
         if path.startswith("/api/admin/"):
             admin = await self.require_admin(request)

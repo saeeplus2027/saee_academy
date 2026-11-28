@@ -1,7 +1,6 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const API_BASE = (window.SAEE_API_BASE || '').replace(/\/$/, '');
-const AUTH_TOKEN_KEY = 'saee_academy_session_token';
 const page = document.body.dataset.page || 'home';
 let currentUser = null;
 let courses = [];
@@ -13,9 +12,7 @@ if ($('#year')) $('#year').textContent = new Date().getFullYear();
 
 async function api(path, options = {}) {
   if (!API_BASE) throw new Error('إعداد الاتصال بالخادم غير موجود.');
-  const savedToken = localStorage.getItem(AUTH_TOKEN_KEY);
   const headers = {
-    ...(savedToken ? {authorization: `Bearer ${savedToken}`} : {}),
     ...(options.body && typeof options.body === 'string' ? {'content-type': 'application/json'} : {}),
     ...(options.headers || {})
   };
@@ -32,7 +29,6 @@ async function api(path, options = {}) {
   let data = {};
   try { data = await response.json(); } catch {}
   if (!response.ok) throw new Error(data.error || 'تعذر تنفيذ الطلب.');
-  if (data.session_token) localStorage.setItem(AUTH_TOKEN_KEY, data.session_token);
   return data;
 }
 
@@ -169,7 +165,6 @@ function setupSharedControls() {
   });
   $('#profileLogout')?.addEventListener('click', async () => {
     try { await api('/api/auth/logout', {method: 'POST'}); } catch {}
-    localStorage.removeItem(AUTH_TOKEN_KEY);
     currentUser = null;
     updateNavigation();
     closeProfileDropdown();
@@ -179,7 +174,6 @@ function setupSharedControls() {
 
   document.addEventListener('click', event => {
     if (!event.target.closest('.profile-area')) closeProfileDropdown();
-    if (event.target.closest('#courseEnrollButton')) requestEnrollment();
   });
   $$('[data-close="1"]').forEach(element => element.addEventListener('click', closeModals));
 
@@ -571,10 +565,6 @@ async function loadCourseDetail() {
           <a class="btn btn-primary btn-lg course-content-jump" href="#courseContent">عرض محتوى المادة</a>
         ` : `
           ${enrollmentStatusMarkup(c.id)}
-          <div class="course-enrollment-actions">
-            ${enrollmentActionMarkup(c.id)}
-            <div id="courseEnrollMessage" class="form-error" role="status" aria-live="polite"></div>
-          </div>
           ${await getSubscriptionContactMarkup()}
         `}
         <a class="text-link" href="courses.html">العودة إلى المواد</a>
@@ -682,19 +672,32 @@ function selectCourseVideo(videoId, autoplay = true) {
   player.setAttribute('disablePictureInPicture', '');
   player.oncontextmenu = event => event.preventDefault();
   player.onerror = () => {
-    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'تعذر تشغيل الفيديو. حدّث الصفحة أو تواصل مع الإدارة.';
+    const mediaError = player.error;
+    const errorCode = mediaError?.code || 0;
+    const details = {
+      1: 'تم إيقاف تشغيل الفيديو.',
+      2: 'تعذر تنزيل الفيديو من الخادم. تحقق من الاتصال وحاول مجدداً.',
+      3: 'تعذر فك ترميز الفيديو. قد تكون صيغة الملف غير مدعومة.',
+      4: 'صيغة الفيديو أو مصدره غير مدعوم. ارفع الفيديو بصيغة MP4 (H.264 + AAC).',
+    };
+    if ($('#courseVideoMessage')) {
+      $('#courseVideoMessage').textContent = details[errorCode] || 'تعذر تشغيل الفيديو. تحقق من الاتصال أو أعد رفعه بصيغة MP4 (H.264 + AAC).';
+    }
   };
-  // A <video> element cannot send our Bearer header. Pass the current
-  // session token only to this authenticated media endpoint.
-  const mediaToken = localStorage.getItem(AUTH_TOKEN_KEY) || '';
-  const mediaUrl = new URL(`${API_BASE}/api/watch/${encodeURIComponent(videoId)}`);
-  if (mediaToken) mediaUrl.searchParams.set('session', mediaToken);
-  player.src = mediaUrl.toString();
+  player.onloadedmetadata = () => {
+    const message = $('#courseVideoMessage');
+    if (message) message.textContent = 'الفيديو جاهز للمشاهدة.';
+  };
+  player.src = `${API_BASE}/api/watch/${encodeURIComponent(videoId)}`;
   player.load();
   if (autoplay) {
     const playPromise = player.play();
     if (playPromise?.catch) playPromise.catch(() => {
-      if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'اضغط تشغيل لبدء الفيديو.';
+      if (player.error) {
+        player.onerror();
+      } else if ($('#courseVideoMessage')) {
+        $('#courseVideoMessage').textContent = 'اضغط تشغيل لبدء الفيديو.';
+      }
     });
   }
 }
@@ -728,7 +731,7 @@ async function requestEnrollment() {
   const button = $('#courseEnrollButton');
   const message = $('#courseEnrollMessage');
   button.disabled = true;
-  if (message) message.textContent = '';
+  message.textContent = '';
   try {
     const result = await api('/api/enrollments', {
       method: 'POST',
@@ -745,16 +748,16 @@ async function requestEnrollment() {
       await loadCourseDetail();
       const current = getEnrollmentState(selectedCourse.id);
       if (current && ['pending', 'approved', 'expired', 'rejected'].includes(current.display_status)) {
-        if (message) message.textContent = current.display_status === 'approved'
+        message.textContent = current.display_status === 'approved'
           ? 'تم قبول اشتراكك بالفعل.'
           : current.display_status === 'pending'
             ? 'طلبك ما زال قيد المراجعة.'
             : error.message;
       } else {
-        if (message) message.textContent = error.message;
+        message.textContent = error.message;
       }
     } catch {
-      if (message) message.textContent = error.message;
+      message.textContent = error.message;
     }
   } finally {
     if ($('#courseEnrollButton')) $('#courseEnrollButton').disabled = false;
