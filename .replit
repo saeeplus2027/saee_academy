@@ -22,4 +22,4 @@ timeoutMs = 20000
 [userenv]
 
 [userenv.shared]
-# Configure SAI_ADMIN_EMAIL in Replit environment settings; do not commit its value.
+# Configure SAI_ADMIN_EMAIL in the host environment; do not commit its value.
