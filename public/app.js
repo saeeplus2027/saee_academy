@@ -676,57 +676,105 @@ function renderCourseVideoWorkspace() {
   });
 }
 
+let videoLoadWatchdog = null;
+
 async function selectCourseVideo(videoId, autoplay = true) {
   const video = courseVideos.find(item => item.id === videoId);
   const player = $('#courseVideoPlayer');
   if (!video || !player) return;
+  if (videoLoadWatchdog) clearTimeout(videoLoadWatchdog);
+
   activeVideoId = videoId;
   $$('#courseVideoList [data-play-video]').forEach(button => {
     button.classList.toggle('active', button.dataset.playVideo === videoId);
   });
   $('#courseVideoNow').textContent = video.title;
   const message = $('#courseVideoMessage');
-  message.textContent = 'جارٍ تجهيز الفيديو...';
+  message.textContent = 'جارٍ تجهيز رابط مشاهدة الفيديو...';
   player.pause();
   player.removeAttribute('src');
   player.load();
-  // The stream URL receives a short-lived ticket. This works even when the
-  // browser blocks third-party cookies between GitHub Pages and workers.dev.
   player.crossOrigin = 'anonymous';
+  player.preload = 'auto';
   player.onended = null;
   player.setAttribute('controlsList', 'nodownload');
   player.setAttribute('disablePictureInPicture', '');
   player.oncontextmenu = event => event.preventDefault();
+
+  const clearWatchdog = () => {
+    if (videoLoadWatchdog) clearTimeout(videoLoadWatchdog);
+    videoLoadWatchdog = null;
+  };
   player.onerror = () => {
+    clearWatchdog();
     const mediaError = player.error;
     const errorCode = mediaError?.code || 0;
     const details = {
-      1: 'تم إيقاف تشغيل الفيديو.',
-      2: 'تعذر تنزيل الفيديو من الخادم. تحقق من الاتصال وحاول مجدداً.',
-      3: 'تعذر فك ترميز الفيديو. قد تكون صيغة الملف غير مدعومة.',
-      4: 'صيغة الفيديو أو مصدره غير مدعوم. ارفع الفيديو بصيغة MP4 (H.264 + AAC).',
+      1: 'تم إيقاف تحميل الفيديو.',
+      2: 'انقطع الاتصال أثناء تحميل الفيديو. افحص اتصال الإنترنت ثم أعد المحاولة.',
+      3: 'وصل الفيديو لكن تعذّر فك ترميزه. أعد رفعه بصيغة MP4 بترميز H.264 وAAC.',
+      4: 'لم يستطع المتصفح قراءة ملف الفيديو. تأكد من أن الملف MP4 صالح.'
     };
-    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = details[errorCode] || 'تعذر تشغيل الفيديو. تحقق من الاتصال أو أعد رفعه بصيغة MP4 (H.264 + AAC).';
+    console.error('SAEE_VIDEO_PLAYBACK_ERROR', {
+      videoId, code: errorCode, networkState: player.networkState,
+      readyState: player.readyState, currentSrc: player.currentSrc
+    });
+    if ($('#courseVideoMessage')) {
+      $('#courseVideoMessage').textContent = details[errorCode] || 'تعذّر تشغيل الفيديو. حاول إعادة تحميل الصفحة أو أعد رفع الملف بصيغة MP4 (H.264 + AAC).';
+    }
   };
   player.onloadedmetadata = () => {
+    clearWatchdog();
+    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'تم تحميل بيانات الفيديو. اضغط تشغيل للمشاهدة.';
+  };
+  player.oncanplay = () => {
+    clearWatchdog();
     if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'الفيديو جاهز للمشاهدة.';
   };
+  player.onplaying = () => {
+    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'الفيديو قيد التشغيل.';
+  };
+  player.onwaiting = () => {
+    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'جارٍ تحميل أجزاء الفيديو...';
+  };
+  player.onstalled = () => {
+    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'الاتصال متوقف مؤقتاً أثناء تحميل الفيديو...';
+  };
+
   try {
     const ticketData = await api(`/api/watch-ticket/${encodeURIComponent(videoId)}`, {cache: 'no-store'});
     if (activeVideoId !== videoId) return;
     if (!ticketData.ticket) throw new Error('لم يتم تجهيز رابط تشغيل الفيديو.');
+
     const streamUrl = new URL(`${API_BASE}/api/watch/${encodeURIComponent(videoId)}`);
     streamUrl.searchParams.set('ticket', ticketData.ticket);
     player.src = streamUrl.toString();
     player.load();
+    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'تم التحقق من الاشتراك. جارٍ تحميل الفيديو من الخادم...';
+
+    videoLoadWatchdog = setTimeout(() => {
+      if (activeVideoId === videoId && player.readyState < HTMLMediaElement.HAVE_METADATA) {
+        if ($('#courseVideoMessage')) {
+          $('#courseVideoMessage').textContent = 'لم تصل بيانات الفيديو من الخادم. قد لا يكون تحديث Cloudflare Worker قد نُشر بعد؛ أعد المحاولة بعد التأكد من نجاح نشر API.';
+        }
+        console.error('SAEE_VIDEO_LOAD_TIMEOUT', {
+          videoId, networkState: player.networkState, readyState: player.readyState,
+          currentSrc: player.currentSrc
+        });
+      }
+    }, 25000);
+
     if (autoplay) {
       const playPromise = player.play();
       if (playPromise?.catch) playPromise.catch(() => {
-        if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'تم تجهيز الفيديو. اضغط زر التشغيل لبدء المشاهدة.';
+        if ($('#courseVideoMessage') && player.readyState >= HTMLMediaElement.HAVE_METADATA) {
+          $('#courseVideoMessage').textContent = 'تم تجهيز الفيديو. اضغط زر التشغيل لبدء المشاهدة.';
+        }
       });
     }
   } catch (error) {
-    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = error.message || 'تعذر تجهيز تشغيل الفيديو.';
+    clearWatchdog();
+    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = error.message || 'تعذّر تجهيز تشغيل الفيديو.';
   }
 }
 

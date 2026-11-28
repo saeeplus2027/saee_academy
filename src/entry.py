@@ -924,27 +924,34 @@ class Default(WorkerEntrypoint):
                     403,
                 )
 
-            # Stream the MP4 directly from R2 and honor the browser's byte-range
-            # requests. Native video players (especially Safari/iOS and some
-            # Android browsers) rely on 206 + Content-Range while loading/seek.
+            # Native HTML5 players use byte ranges to read MP4 metadata (the
+            # moov atom may be at the end of the file) and to seek without
+            # downloading the complete video. Do not pass request.headers here:
+            # the Python Workers SDK exposes it as an email.message.Message,
+            # while R2 expects a JS Headers or an R2Range object. Build the
+            # explicit JavaScript R2Range object to keep ranged reads reliable.
             range_header = request.headers.get("range", "").strip()
-            requested_range = None
-            range_start = range_end = None
+            requested_range = False
+            range_start = 0
+            range_end = -1
+            total_size = 0
+            metadata = None
+            obj = None
 
             try:
-                # Check the object's real size before asking R2 for a partial
-                # read, so invalid or unsatisfiable ranges get a clean HTTP 416.
-                if range_header:
+                if method == "HEAD" or range_header:
                     metadata = await self.env.MEDIA.head(access["object_key"])
                     if not metadata:
                         return json_response({"error": "الفيديو غير موجود في مساحة التخزين."}, 404)
                     total_size = int(metadata.size)
 
+                if range_header:
                     match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
-                    if not match or (not match.group(1) and not match.group(2)):
+                    if not match or (not match.group(1) and not match.group(2)) or total_size <= 0:
                         return Response("", status=416, headers={
                             "accept-ranges": "bytes",
                             "content-range": f"bytes */{total_size}",
+                            "content-length": "0",
                         })
                     first, last = match.group(1), match.group(2)
                     if first:
@@ -956,17 +963,47 @@ class Default(WorkerEntrypoint):
                             return Response("", status=416, headers={
                                 "accept-ranges": "bytes",
                                 "content-range": f"bytes */{total_size}",
+                                "content-length": "0",
                             })
                         range_start = max(total_size - suffix_length, 0)
                         range_end = total_size - 1
 
-                    if total_size <= 0 or range_start >= total_size or range_end < range_start:
+                    if range_start >= total_size or range_end < range_start:
                         return Response("", status=416, headers={
                             "accept-ranges": "bytes",
                             "content-range": f"bytes */{total_size}",
+                            "content-length": "0",
                         })
                     requested_range = True
-                    obj = await self.env.MEDIA.get(access["object_key"], range=request.headers)
+
+                # HEAD is metadata-only. Return exactly the headers the player
+                # would receive for GET, without opening an unnecessary R2 body.
+                if method == "HEAD":
+                    content_type = getattr(getattr(metadata, "httpMetadata", None), "contentType", None) or "video/mp4"
+                    if not content_type.lower().startswith("video/"):
+                        content_type = "video/mp4"
+                    response_length = (range_end - range_start + 1) if requested_range else total_size
+                    headers = {
+                        "content-type": content_type,
+                        "accept-ranges": "bytes",
+                        "content-length": str(response_length),
+                        "cache-control": "private, no-store, no-transform",
+                        "content-disposition": "inline",
+                        "x-content-type-options": "nosniff",
+                    }
+                    etag = getattr(metadata, "httpEtag", None)
+                    if etag:
+                        headers["etag"] = etag
+                    status = 206 if requested_range else 200
+                    if requested_range:
+                        headers["content-range"] = f"bytes {range_start}-{range_end}/{total_size}"
+                    return Response(None, status=status, headers=headers)
+
+                if requested_range:
+                    r2_range = Object.new()
+                    r2_range.offset = range_start
+                    r2_range.length = range_end - range_start + 1
+                    obj = await self.env.MEDIA.get(access["object_key"], range=r2_range)
                 else:
                     obj = await self.env.MEDIA.get(access["object_key"])
                     if not obj:
@@ -976,7 +1013,7 @@ class Default(WorkerEntrypoint):
                 print("[SAEE_VIDEO_R2_READ_ERROR]", type(exc).__name__, str(exc))
                 return json_response({"error": "تعذر قراءة الفيديو من مساحة التخزين."}, 502)
 
-            if not obj or not hasattr(obj, "body"):
+            if not obj or not hasattr(obj, "body") or obj.body is None:
                 return json_response({"error": "تعذر تجهيز بث الفيديو من التخزين."}, 502)
 
             status = 206 if requested_range else 200
@@ -998,8 +1035,7 @@ class Default(WorkerEntrypoint):
             if requested_range:
                 response_headers["content-range"] = f"bytes {range_start}-{range_end}/{total_size}"
 
-            body = None if method == "HEAD" else obj.body
-            return Response(body, status=status, headers=response_headers)
+            return Response(obj.body, status=status, headers=response_headers)
 
         if path.startswith("/api/admin/"):
             admin = await self.require_admin(request)
