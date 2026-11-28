@@ -90,6 +90,24 @@ def cookie_value(request, name):
     return ""
 
 
+def request_session_tokens(request):
+    """Return new Bearer credentials first, then a legacy session cookie."""
+    tokens = []
+    authorization = request.headers.get("authorization", "")
+    scheme, separator, value = authorization.partition(" ")
+    if separator and scheme.lower() == "bearer" and value.strip():
+        tokens.append(value.strip())
+    legacy_cookie = cookie_value(request, "saee_session")
+    if legacy_cookie and legacy_cookie not in tokens:
+        tokens.append(legacy_cookie)
+    return tokens
+
+
+def request_session_token(request):
+    tokens = request_session_tokens(request)
+    return tokens[0] if tokens else ""
+
+
 async def parse_body(request):
     try:
         body = await request.json()
@@ -123,7 +141,7 @@ class Default(WorkerEntrypoint):
                     "access-control-allow-origin": origin,
                     "access-control-allow-credentials": "true",
                     "access-control-allow-methods": "GET,HEAD,POST,PUT,DELETE,OPTIONS",
-                    "access-control-allow-headers": "content-type,range,if-range,x-video-title,x-bootstrap-key",
+                    "access-control-allow-headers": "content-type,authorization,range,if-range,x-video-title,x-bootstrap-key",
                     "access-control-expose-headers": "accept-ranges,content-range,content-length,etag",
                     "access-control-max-age": "86400",
                     "vary": "Origin",
@@ -154,6 +172,18 @@ class Default(WorkerEntrypoint):
                 headers=cors,
             )
 
+    async def ensure_watch_tickets_table(self):
+        """Create short-lived, per-video playback tickets for native media requests."""
+        await self.env.DB.prepare(
+            "CREATE TABLE IF NOT EXISTS watch_tickets ("
+            "token_hash TEXT PRIMARY KEY,video_id TEXT NOT NULL,user_id TEXT NOT NULL,"
+            "expires_at TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        ).run()
+        await self.env.DB.prepare(
+            "CREATE INDEX IF NOT EXISTS idx_watch_tickets_video_expiry "
+            "ON watch_tickets(video_id,expires_at)"
+        ).run()
+
     async def ensure_video_progress_table(self):
         """Create progress storage on demand for databases where migration 0003 was not applied."""
         await self.env.DB.prepare(
@@ -169,26 +199,28 @@ class Default(WorkerEntrypoint):
         ).run()
 
     async def current_user(self, request):
-        token = cookie_value(request, "saee_session")
-        if not token:
+        tokens = request_session_tokens(request)
+        if not tokens:
             return None
 
-        row = await self.env.DB.prepare(
-            "SELECT u.id,u.full_name,u.email,u.role,u.is_active,s.expires_at "
-            "FROM sessions s JOIN users u ON u.id=s.user_id "
-            "WHERE s.token_hash=?"
-        ).bind(token_digest(token)).first()
+        now = datetime.now(timezone.utc).isoformat()
+        for token in tokens:
+            digest = token_digest(token)
+            row = await self.env.DB.prepare(
+                "SELECT u.id,u.full_name,u.email,u.role,u.is_active,s.expires_at "
+                "FROM sessions s JOIN users u ON u.id=s.user_id "
+                "WHERE s.token_hash=?"
+            ).bind(digest).first()
 
-        if not row or not row["is_active"]:
-            return None
-
-        if row["expires_at"] < datetime.now(timezone.utc).isoformat():
-            await self.env.DB.prepare(
-                "DELETE FROM sessions WHERE token_hash=?"
-            ).bind(token_digest(token)).run()
-            return None
-
-        return row
+            if not row or not row["is_active"]:
+                continue
+            if row["expires_at"] < now:
+                await self.env.DB.prepare(
+                    "DELETE FROM sessions WHERE token_hash=?"
+                ).bind(digest).run()
+                continue
+            return row
+        return None
 
     async def require_admin(self, request):
         user = await self.current_user(request)
@@ -437,7 +469,7 @@ class Default(WorkerEntrypoint):
                     500,
                 )
             return json_response(
-                {"ok": True, "message": "تم إنشاء الحساب وتسجيل دخولك بنجاح."},
+                {"ok": True, "token": token, "message": "تم إنشاء الحساب وتسجيل دخولك بنجاح."},
                 201,
                 headers={
                     "set-cookie": (
@@ -484,7 +516,7 @@ class Default(WorkerEntrypoint):
             ).bind(token_digest(token), row["id"], expires).run()
 
             return json_response(
-                {"ok": True},
+                {"ok": True, "token": token},
                 headers={
                     "set-cookie": (
                         f"saee_session={token}; HttpOnly; Secure; "
@@ -494,7 +526,7 @@ class Default(WorkerEntrypoint):
             )
 
         if path == "/api/auth/logout" and method == "POST":
-            token = cookie_value(request, "saee_session")
+            token = request_session_token(request)
             if token:
                 await self.env.DB.prepare(
                     "DELETE FROM sessions WHERE token_hash=?"
@@ -559,7 +591,7 @@ class Default(WorkerEntrypoint):
                 ).bind(full_name, new_hash, new_salt, user["id"]).run()
                 # Revoke other sessions after changing a password, then refresh the
                 # current session expiry by preserving its current token.
-                current_token = cookie_value(request, "saee_session")
+                current_token = request_session_token(request)
                 await self.env.DB.prepare(
                     "DELETE FROM sessions WHERE user_id=? AND token_hash<>?"
                 ).bind(user["id"], token_digest(current_token)).run()
@@ -614,10 +646,50 @@ class Default(WorkerEntrypoint):
             )
 
         user = await self.current_user(request)
+        if not user and path.startswith("/api/watch/") and method in ("GET", "HEAD"):
+            # Native <video> requests cannot attach Authorization headers. The
+            # frontend first asks for a short-lived ticket using its Bearer token.
+            query = parse_qs(urlsplit(request.url).query)
+            playback_ticket = query.get("ticket", [""])[0]
+            if playback_ticket:
+                await self.ensure_watch_tickets_table()
+                ticket_video_id = path.rsplit("/", 1)[-1]
+                ticket_row = await self.env.DB.prepare(
+                    "SELECT t.user_id FROM watch_tickets t JOIN users u ON u.id=t.user_id "
+                    "WHERE t.token_hash=? AND t.video_id=? AND t.expires_at>? AND u.is_active=1"
+                ).bind(
+                    token_digest(playback_ticket), ticket_video_id,
+                    datetime.now(timezone.utc).isoformat()
+                ).first()
+                if ticket_row:
+                    user = await self.env.DB.prepare(
+                        "SELECT id,full_name,email,role,is_active FROM users WHERE id=? AND is_active=1"
+                    ).bind(ticket_row["user_id"]).first()
         if not user:
             return json_response(
-                {"error": "يجب تسجيل الدخول أولاً."}, 401
+                {"error": "انتهت جلسة الدخول. سجّل الدخول مرة أخرى للمتابعة."}, 401
             )
+
+        # Issue a short-lived playback ticket only after confirming the current
+        # user has an active subscription to the requested video.
+        if path.startswith("/api/watch-ticket/") and method == "GET":
+            video_id = path.rsplit("/", 1)[-1]
+            access = await self.env.DB.prepare(
+                "SELECT v.id FROM videos v JOIN enrollment_requests e ON e.course_id=v.course_id "
+                "WHERE v.id=? AND e.student_id=? AND e.status='approved' AND e.expires_at>? LIMIT 1"
+            ).bind(video_id, user["id"], datetime.now(timezone.utc).isoformat()).first()
+            if not access:
+                return json_response({"error": "لا تملك اشتراكاً فعالاً لمشاهدة هذا الفيديو."}, 403)
+            await self.ensure_watch_tickets_table()
+            await self.env.DB.prepare("DELETE FROM watch_tickets WHERE expires_at<=?").bind(
+                datetime.now(timezone.utc).isoformat()
+            ).run()
+            playback_ticket = secrets.token_urlsafe(32)
+            ticket_expires = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat()
+            await self.env.DB.prepare(
+                "INSERT INTO watch_tickets(token_hash,video_id,user_id,expires_at) VALUES(?,?,?,?)"
+            ).bind(token_digest(playback_ticket), video_id, user["id"], ticket_expires).run()
+            return json_response({"ticket": playback_ticket, "expires_at": ticket_expires})
 
         # Student PDF library. These endpoints are inside the existing session-authenticated
         # section; no paid-course enrollment is required for these user-uploaded files.

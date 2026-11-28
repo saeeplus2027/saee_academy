@@ -6,20 +6,29 @@ let adminCourses = [];
 let adminSpecializations = [];
 let selectedQuestionLibrarySubjectId = '';
 
+const AUTH_TOKEN_KEY = 'saee_academy_session_token_v1';
+function getAuthToken() { try { return localStorage.getItem(AUTH_TOKEN_KEY) || ''; } catch { return ''; } }
+function saveAuthToken(token) { if (typeof token === 'string' && token) { try { localStorage.setItem(AUTH_TOKEN_KEY, token); } catch {} } }
+function clearAuthToken() { try { localStorage.removeItem(AUTH_TOKEN_KEY); } catch {} }
+
 async function api(path, options = {}) {
   if (!API_BASE) throw new Error('إعداد عنوان الخادم غير موجود.');
   const headers = {
     ...(options.body && typeof options.body === 'string' ? {'content-type': 'application/json'} : {}),
     ...(options.headers || {})
   };
+  const token = getAuthToken();
+  if (token) headers.authorization = `Bearer ${token}`;
   let response;
   try {
-    response = await fetch(API_BASE + path, {credentials: 'include', ...options, headers});
+    response = await fetch(API_BASE + path, {credentials: 'include', cache: 'no-store', ...options, headers});
   } catch {
     throw new Error('تعذر الاتصال بخادم سعي أكاديمي.');
   }
   let data = {};
   try { data = await response.json(); } catch {}
+  if (data.token) saveAuthToken(data.token);
+  if (response.status === 401 && !path.startsWith('/api/auth/login') && !path.startsWith('/api/auth/register')) clearAuthToken();
   if (!response.ok) throw new Error(data.error || 'حدث خطأ غير متوقع.');
   return data;
 }
@@ -86,6 +95,7 @@ $('#adminLoginForm').addEventListener('submit', async event => {
 
 $('#adminLogout').addEventListener('click', async () => {
   try { await api('/api/auth/logout', {method: 'POST'}); } catch {}
+  clearAuthToken();
   location.href = 'index.html';
 });
 
@@ -403,7 +413,8 @@ $('#videoForm').addEventListener('submit', async event => {
     uploadUrl.searchParams.set('title_b64', titleBase64Url);
     const response = await fetch(uploadUrl.toString(), {
       method: 'POST', credentials: 'include',
-      // No custom headers: the Worker defaults the stored MIME type to video/mp4.
+      headers: getAuthToken() ? {authorization: `Bearer ${getAuthToken()}`} : {},
+      // No custom content-type header: the Worker defaults the stored MIME type to video/mp4.
       body: file
     });
     let data = {};
@@ -614,7 +625,7 @@ $('#questionFileForm')?.addEventListener('submit', async event => {
     uploadUrl.searchParams.set('filename_b64', adminBase64Url(file.name));
     const response = await fetch(uploadUrl.toString(), {
       method: 'POST', credentials: 'include',
-      headers: {'content-type': 'application/pdf'}, body: file
+      headers: {'content-type': 'application/pdf', ...(getAuthToken() ? {authorization: `Bearer ${getAuthToken()}`} : {})}, body: file
     });
     let data = {};
     try { data = await response.json(); } catch {}

@@ -10,16 +10,31 @@ let myEnrollments = new Map();
 
 if ($('#year')) $('#year').textContent = new Date().getFullYear();
 
+const AUTH_TOKEN_KEY = 'saee_academy_session_token_v1';
+function getAuthToken() {
+  try { return localStorage.getItem(AUTH_TOKEN_KEY) || ''; } catch { return ''; }
+}
+function saveAuthToken(token) {
+  if (typeof token !== 'string' || !token) return;
+  try { localStorage.setItem(AUTH_TOKEN_KEY, token); } catch {}
+}
+function clearAuthToken() {
+  try { localStorage.removeItem(AUTH_TOKEN_KEY); } catch {}
+}
+
 async function api(path, options = {}) {
   if (!API_BASE) throw new Error('إعداد الاتصال بالخادم غير موجود.');
   const headers = {
     ...(options.body && typeof options.body === 'string' ? {'content-type': 'application/json'} : {}),
     ...(options.headers || {})
   };
+  const token = getAuthToken();
+  if (token) headers.authorization = `Bearer ${token}`;
   let response;
   try {
     response = await fetch(API_BASE + path, {
       credentials: 'include',
+      cache: 'no-store',
       ...options,
       headers
     });
@@ -28,6 +43,10 @@ async function api(path, options = {}) {
   }
   let data = {};
   try { data = await response.json(); } catch {}
+  if (data.token) saveAuthToken(data.token);
+  if (response.status === 401 && !path.startsWith('/api/auth/login') && !path.startsWith('/api/auth/register')) {
+    clearAuthToken();
+  }
   if (!response.ok) throw new Error(data.error || 'تعذر تنفيذ الطلب.');
   return data;
 }
@@ -165,6 +184,7 @@ function setupSharedControls() {
   });
   $('#profileLogout')?.addEventListener('click', async () => {
     try { await api('/api/auth/logout', {method: 'POST'}); } catch {}
+    clearAuthToken();
     currentUser = null;
     updateNavigation();
     closeProfileDropdown();
@@ -385,7 +405,7 @@ async function transferQuestionPdf(fileId, download, fileName) {
   try {
     const response = await fetch(
       API_BASE + '/api/question-file/' + encodeURIComponent(fileId) + (download ? '?download=1' : ''),
-      {method: 'GET', credentials: 'include', cache: 'no-store'}
+      {method: 'GET', credentials: 'include', cache: 'no-store', headers: getAuthToken() ? {authorization: `Bearer ${getAuthToken()}`} : {}}
     );
     if (!response.ok) {
       let data = {};
@@ -652,7 +672,7 @@ function renderCourseVideoWorkspace() {
   });
 }
 
-function selectCourseVideo(videoId, autoplay = true) {
+async function selectCourseVideo(videoId, autoplay = true) {
   const video = courseVideos.find(item => item.id === videoId);
   const player = $('#courseVideoPlayer');
   if (!video || !player) return;
@@ -662,11 +682,13 @@ function selectCourseVideo(videoId, autoplay = true) {
   });
   $('#courseVideoNow').textContent = video.title;
   const message = $('#courseVideoMessage');
-  message.textContent = (Number(video.completed) === 1 || video.completed === true)
-    ? '✓ هذا الفيديو مُنجز سابقاً.'
-    : 'شاهد الفيديو حتى نهايته ليُسجّل كفيديو مُنجز.';
-  // The media is served from the Cloudflare Worker origin; send the session cookie.
-  player.crossOrigin = 'use-credentials';
+  message.textContent = 'جارٍ تجهيز الفيديو...';
+  player.pause();
+  player.removeAttribute('src');
+  player.load();
+  // The stream URL receives a short-lived ticket. This works even when the
+  // browser blocks third-party cookies between GitHub Pages and workers.dev.
+  player.crossOrigin = 'anonymous';
   player.onended = null;
   player.setAttribute('controlsList', 'nodownload');
   player.setAttribute('disablePictureInPicture', '');
@@ -680,25 +702,27 @@ function selectCourseVideo(videoId, autoplay = true) {
       3: 'تعذر فك ترميز الفيديو. قد تكون صيغة الملف غير مدعومة.',
       4: 'صيغة الفيديو أو مصدره غير مدعوم. ارفع الفيديو بصيغة MP4 (H.264 + AAC).',
     };
-    if ($('#courseVideoMessage')) {
-      $('#courseVideoMessage').textContent = details[errorCode] || 'تعذر تشغيل الفيديو. تحقق من الاتصال أو أعد رفعه بصيغة MP4 (H.264 + AAC).';
-    }
+    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = details[errorCode] || 'تعذر تشغيل الفيديو. تحقق من الاتصال أو أعد رفعه بصيغة MP4 (H.264 + AAC).';
   };
   player.onloadedmetadata = () => {
-    const message = $('#courseVideoMessage');
-    if (message) message.textContent = 'الفيديو جاهز للمشاهدة.';
+    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'الفيديو جاهز للمشاهدة.';
   };
-  player.src = `${API_BASE}/api/watch/${encodeURIComponent(videoId)}`;
-  player.load();
-  if (autoplay) {
-    const playPromise = player.play();
-    if (playPromise?.catch) playPromise.catch(() => {
-      if (player.error) {
-        player.onerror();
-      } else if ($('#courseVideoMessage')) {
-        $('#courseVideoMessage').textContent = 'اضغط تشغيل لبدء الفيديو.';
-      }
-    });
+  try {
+    const ticketData = await api(`/api/watch-ticket/${encodeURIComponent(videoId)}`, {cache: 'no-store'});
+    if (activeVideoId !== videoId) return;
+    if (!ticketData.ticket) throw new Error('لم يتم تجهيز رابط تشغيل الفيديو.');
+    const streamUrl = new URL(`${API_BASE}/api/watch/${encodeURIComponent(videoId)}`);
+    streamUrl.searchParams.set('ticket', ticketData.ticket);
+    player.src = streamUrl.toString();
+    player.load();
+    if (autoplay) {
+      const playPromise = player.play();
+      if (playPromise?.catch) playPromise.catch(() => {
+        if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = 'تم تجهيز الفيديو. اضغط زر التشغيل لبدء المشاهدة.';
+      });
+    }
+  } catch (error) {
+    if ($('#courseVideoMessage')) $('#courseVideoMessage').textContent = error.message || 'تعذر تجهيز تشغيل الفيديو.';
   }
 }
 
