@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="سعي أكاديمي - شروحات جامعية منظمة للطلاب">
+  <meta name="theme-color" content="#f7f9ff">
+  <title>مكتبة الأسئلة | سعي أكاديمي</title>
+  <link rel="icon" id="siteFavicon" type="image/jpeg" href="https://cdn.phototourl.com/member/2026-11-27-1dc072ef-e4f9-4750-bcd8-c4b3b6d887d5.jpg">
+  <link rel="apple-touch-icon" id="siteAppleIcon" href="https://cdn.phototourl.com/member/2026-11-27-1dc072ef-e4f9-4750-bcd8-c4b3b6d887d5.jpg">
+  <link rel="stylesheet" href="styles.css?v=question-library1">
+</head>
+<body data-page="questions" data-requires-auth="true">
+<header class="topbar">
+  <a class="brand" href="index.html"><img src="logo.svg" data-content-image="logo_url" alt="شعار سعي أكاديمي"><span><b data-content-key="brand_name">سعي أكاديمي</b><small>SAEE ACADEMY</small></span></a>
+  <nav class="site-nav">
+    <a data-nav="home" href="index.html">الرئيسية</a>
+    <a data-nav="specializations" href="specializations.html">التخصصات</a>
+    <a data-nav="courses" href="courses.html">المواد</a>
+    <a data-nav="how" href="how.html">كيف تعمل المنصة</a>
+    <a data-nav="questions" href="questions.html">مكتبة الأسئلة</a>
+  </nav>
+  <div class="nav-actions">
+    <button id="loginOpen" class="btn btn-outline">تسجيل الدخول</button>
+    <button id="registerOpen" class="btn btn-primary">إنشاء حساب</button>
+    <div id="profileArea" class="profile-area hidden">
+      <button id="profileMenuButton" class="profile-menu-button" aria-expanded="false"><span id="userLabel">مرحباً</span><span class="profile-chevron">⌄</span></button>
+      <div id="profileDropdown" class="profile-dropdown hidden">
+        <div id="profileEmail" class="profile-email"></div>
+        <button id="editProfileOpen" type="button">إعدادات الحساب</button>
+        <a id="adminPageLink" class="hidden" href="admin.html">لوحة الإدارة</a>
+        <button id="profileLogout" type="button">تسجيل الخروج</button>
+      </div>
+    </div>
+  </div>
+</header>
+<main class="page-shell">
+  <section class="page-title">
+    <span class="eyebrow">أسئلة السنوات السابقة</span>
+    <h1>مكتبة الأسئلة</h1>
+    <p>اختر المادة لعرض ملفات الأسئلة والامتحانات السابقة التي أضافتها الإدارة بصيغة PDF.</p>
+  </section>
+  <section id="questionCourseGrid" class="course-grid page-grid">
+    <div class="empty-state">جارٍ تحميل المواد...</div>
+  </section>
+  <section id="questionFilesPanel" class="question-files-panel hidden">
+    <div class="question-files-heading">
+      <div>
+        <span class="eyebrow">ملفات المادة</span>
+        <h2 id="questionSelectedCourse">اسم المادة</h2>
+        <p>يمكنك فتح ملف PDF أو تنزيله على جهازك.</p>
+      </div>
+      <button id="backQuestionCourses" class="btn btn-outline" type="button">العودة إلى المواد</button>
+    </div>
+    <div id="questionFilesList" class="question-files-list">
+      <div class="empty-state">جارٍ تحميل الملفات...</div>
+    </div>
+  </section>
+</main>
+<footer class="site-footer">
+  <a class="brand footer-brand" href="index.html"><img src="logo.svg" data-content-image="logo_url" alt=""><span><b data-content-key="brand_name">سعي أكاديمي</b><small>SAEE ACADEMY</small></span></a>
+  <span>© <span id="year"></span> سعي أكاديمي. <span data-content-key="footer_text">جميع الحقوق محفوظة.</span></span>
+  <span>منصة شروحات جامعية مستقلة</span>
+</footer><div id="authModal" class="modal hidden">
+  <div class="modal-backdrop" data-close="1"></div>
+  <div class="modal-card">
+    <button class="close" data-close="1" aria-label="إغلاق">×</button>
+    <img src="logo.svg" class="modal-logo" alt="">
+    <h2 id="authTitle">أهلاً بك</h2><p id="authSubtitle">سجّل الدخول لمتابعة رحلتك التعليمية.</p>
+    <form id="authForm">
+      <label id="nameField" class="hidden">الاسم الكامل<input name="full_name" autocomplete="name" minlength="2"></label>
+      <label>البريد الإلكتروني<input name="email" type="email" autocomplete="email" required></label>
+      <label>كلمة المرور<input name="password" type="password" minlength="10" autocomplete="current-password" required></label>
+      <button class="btn btn-primary full" id="authSubmit">تسجيل الدخول</button>
+      <div id="authError" class="form-error"></div>
+    </form>
+    <button class="switch-auth" id="switchAuth">ليس لديك حساب؟ أنشئ حساباً</button>
+  </div>
+</div><div id="profileModal" class="modal hidden">
+  <div class="modal-backdrop" data-close="1"></div>
+  <div class="modal-card account-card">
+    <button class="close" data-close="1" aria-label="إغلاق">×</button>
+    <span class="eyebrow">حسابك الشخصي</span><h2>إعدادات الحساب</h2>
+    <p>يمكنك تعديل الاسم وكلمة المرور. اكتب كلمة المرور الحالية لتأكيد التغيير.</p>
+    <form id="profileForm">
+      <label>الاسم الظاهر<input name="full_name" id="profileNameInput" minlength="2" required></label>
+      <label>كلمة المرور الحالية<input name="current_password" type="password" required autocomplete="current-password"></label>
+      <label>كلمة المرور الجديدة <small>(اختياري)</small><input name="new_password" type="password" minlength="10" autocomplete="new-password" placeholder="اتركها فارغة إذا لا تريد تغييرها"></label>
+      <button class="btn btn-primary full" id="profileSave">حفظ التعديلات</button>
+      <div id="profileError" class="form-error"></div>
+    </form>
+    <div class="danger-zone">
+      <h3>حذف الحساب نهائياً</h3>
+      <p>سيتم حذف حسابك وطلبات اشتراكك وجلسات الدخول. لا يمكن التراجع عن هذه الخطوة.</p>
+      <form id="deleteAccountForm">
+        <label>أدخل كلمة المرور للتأكيد<input name="current_password" type="password" required autocomplete="current-password"></label>
+        <button class="btn btn-danger full" type="submit">حذف الحساب نهائياً</button>
+        <div id="deleteAccountError" class="form-error"></div>
+      </form>
+    </div>
+  </div>
+</div><div id="toast" class="toast"></div>
+<script src="config.js"></script>
+<script src="app.js?v=enrollment-admin-fix-20261128"></script>
+</body></html>

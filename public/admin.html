@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="سعي أكاديمي - شروحات جامعية منظمة للطلاب">
+  <meta name="theme-color" content="#f7f9ff">
+  <title>سعي أكاديمي | Saee Academy</title>
+  <link rel="icon" type="image/jpeg" href="https://cdn.phototourl.com/member/2026-11-27-1dc072ef-e4f9-4750-bcd8-c4b3b6d887d5.jpg">
+  <link rel="apple-touch-icon" href="https://cdn.phototourl.com/member/2026-11-27-1dc072ef-e4f9-4750-bcd8-c4b3b6d887d5.jpg">
+  <link rel="stylesheet" href="styles.css?v=question-library1">
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body class="admin-body">
+<header class="topbar">
+  <a class="brand" href="index.html"><img src="logo.svg" alt=""><span>سعي <b>أكاديمي</b><small>لوحة الإدارة</small></span></a>
+  <div class="nav-actions"><a class="btn btn-outline" href="index.html">العودة للموقع</a><button id="adminLogout" class="btn btn-outline hidden">تسجيل الخروج</button></div>
+</header>
+<main class="admin-main">
+  <section id="adminLogin" class="admin-login">
+    <div class="admin-panel">
+      <img src="logo.svg" width="54" alt="">
+      <h1>لوحة تحكم الأدمن</h1><p>سجّل الدخول بحساب الإدارة لإدارة محتوى سعي أكاديمي بالكامل.</p>
+      <form id="adminLoginForm">
+        <label>البريد الإلكتروني<input name="email" type="email" required autocomplete="username"></label>
+        <label>كلمة المرور<input name="password" type="password" required autocomplete="current-password"></label>
+        <button class="btn btn-primary full">دخول لوحة الإدارة</button><div id="loginError" class="form-error"></div>
+      </form>
+    </div>
+  </section>
+  <section id="adminDashboard" class="hidden">
+    <div class="admin-heading"><div><span class="eyebrow">إدارة المنصة</span><h1>لوحة التحكم</h1><p>إدارة الطلبات والمواد والتخصصات والفيديوهات ومكتبة الأسئلة والمستخدمين ونصوص الموقع.</p></div></div>
+    <div class="admin-tabs">
+      <button class="active" data-tab="requests">طلبات الاشتراك</button>
+      <button data-tab="courses">المواد</button>
+      <button data-tab="specializations">التخصصات</button>
+      <button data-tab="videos">الفيديوهات</button>
+      <button data-tab="question-files">مكتبة الأسئلة</button>
+      <button data-tab="users">المستخدمون</button>
+      <button data-tab="site">محتوى الموقع</button>
+    </div>
+
+    <section id="tab-requests" class="admin-panel">
+      <div class="panel-title"><h2>طلبات الاشتراك</h2><button id="refreshRequests" class="btn btn-outline">تحديث</button></div>
+      <div id="requestsList" class="requests-list">جارٍ التحميل...</div>
+    </section>
+
+    <section id="tab-courses" class="admin-panel hidden">
+      <h2>إضافة مادة جديدة</h2>
+      <form id="courseForm" class="admin-form">
+        <label>اسم المادة<input name="name" required maxlength="120"></label>
+        <label>التخصص<select name="specialization_id" id="courseSpecialization" required></select></label>
+        <label>اسم الشارح<input name="instructor_name" required maxlength="100"></label>
+        <label>السعر بالدينار<input name="price_jod" type="number" min="0" max="10000" step="0.01" required></label>
+        <label class="wide">وصف المادة<textarea name="description" rows="3"></textarea></label>
+        <label class="check-label"><input name="is_published" type="checkbox" checked> نشر المادة للطلاب</label>
+        <button class="btn btn-primary">إضافة المادة</button><div id="courseMessage" class="form-error wide"></div>
+      </form>
+      <div class="panel-title section-panel-title"><h2>تعديل وحذف المواد</h2><button id="refreshCourses" class="btn btn-outline">تحديث القائمة</button></div>
+      <div id="adminCoursesList" class="management-list">جارٍ التحميل...</div>
+    </section>
+
+    <section id="tab-specializations" class="admin-panel hidden">
+      <h2>إضافة تخصص</h2>
+      <form id="specializationForm" class="admin-form">
+        <label>اسم التخصص<input name="name" required maxlength="100"></label>
+        <label>وصف مختصر<input name="description" maxlength="500"></label>
+        <button class="btn btn-primary">إضافة التخصص</button><div id="specializationMessage" class="form-error wide"></div>
+      </form>
+      <div class="panel-title section-panel-title"><h2>تعديل وحذف التخصصات</h2><button id="refreshSpecializations" class="btn btn-outline">تحديث القائمة</button></div>
+      <div id="adminSpecializationsList" class="management-list">جارٍ التحميل...</div>
+    </section>
+
+    <section id="tab-videos" class="admin-panel hidden">
+      <h2>إدارة فيديوهات المواد</h2>
+      <p class="muted">يمكن رفع حتى 30 فيديو لكل مادة. يمكن حذف أي فيديو من القائمة.</p>
+      <form id="videoForm" class="admin-form">
+        <label>التخصص<select id="videoSpecialization" required></select></label>
+        <label>المادة<select name="course_id" id="videoCourse" required></select></label>
+        <label>عنوان الفيديو<input name="title" required maxlength="140"></label>
+        <label class="wide">ملف الفيديو<input name="file" type="file" accept="video/*" required></label>
+        <button class="btn btn-primary">رفع الفيديو</button><div id="videoMessage" class="form-error wide"></div>
+      </form>
+      <div class="panel-title section-panel-title"><h2>الفيديوهات المرفوعة</h2><button id="refreshVideos" class="btn btn-outline">تحديث</button></div>
+      <div id="adminVideosList" class="management-list">اختر مادة لعرض فيديوهاتها.</div>
+    </section>
+
+<section id="tab-question-files" class="admin-panel hidden">
+      <div class="panel-title">
+        <div><h2>مكتبة الأسئلة</h2><p class="muted">أضف المواد التي تريد ظهورها في مكتبة الأسئلة فقط.</p></div>
+        <button id="refreshQuestionSubjects" class="btn btn-outline" type="button">تحديث المواد</button>
+      </div>
+
+      <section class="question-library-subject-create">
+        <h3>إضافة مادة جديدة</h3>
+        <p class="muted">اكتب اسم المادة فقط. ستظهر في مكتبة الأسئلة ولن تُضاف إلى صفحة شرح المواد أو الاشتراكات.</p>
+        <form id="questionLibrarySubjectForm" class="admin-form">
+          <label>اسم المادة<input name="name" required maxlength="120" placeholder="مثلاً: الثقافة الإسلامية"></label>
+          <button class="btn btn-primary" type="submit">إضافة المادة</button>
+          <div id="questionLibrarySubjectMessage" class="form-error wide"></div>
+        </form>
+      </section>
+
+      <section class="question-library-added-subjects">
+        <div class="panel-title"><h3>المواد المضافة</h3></div>
+        <div id="adminQuestionSubjectsList" class="management-list">
+          جارٍ تحميل المواد المضافة...
+        </div>
+      </section>
+
+      <section id="questionSubjectManager" class="question-subject-manager hidden">
+        <div class="panel-title">
+          <div><span class="eyebrow">إدارة المادة</span><h3 id="questionSubjectManagerName">اسم المادة</h3></div>
+          <button id="closeQuestionSubjectManager" class="btn btn-outline" type="button">العودة إلى المواد</button>
+        </div>
+        <h4>إضافة ملف PDF</h4>
+        <p class="muted">اختر عنوان الملف وحدد ملف PDF فقط.</p>
+        <form id="questionFileForm" class="admin-form">
+          <label>عنوان الملف<input name="title" required maxlength="140" placeholder="مثلاً: ميد أول أو فاينل 2026"></label>
+          <label class="wide">ملف PDF<input name="file" type="file" accept=".pdf,application/pdf" required></label>
+          <button class="btn btn-primary" type="submit">إضافة ملف PDF</button>
+          <div id="questionFileMessage" class="form-error wide"></div>
+        </form>
+        <div class="panel-title section-panel-title">
+          <h4>الملفات المضافة لهذه المادة</h4>
+          <button id="refreshQuestionFiles" class="btn btn-outline" type="button">تحديث الملفات</button>
+        </div>
+        <div id="adminQuestionFilesList" class="management-list">
+          اختر مادة لعرض ملفاتها.
+        </div>
+      </section>
+    </section>
+
+        <section id="tab-users" class="admin-panel hidden">
+      <div class="panel-title"><h2>إدارة المستخدمين</h2><button id="refreshUsers" class="btn btn-outline">تحديث</button></div>
+      <p class="muted">يمكن تعطيل حساب طالب أو إعادة تفعيله أو حذفه نهائياً. لا يمكن حذف آخر حساب أدمن.</p>
+      <div id="adminUsersList" class="management-list">جارٍ التحميل...</div>
+    </section>
+
+    <section id="tab-site" class="admin-panel hidden">
+      <h2>تعديل النصوص الظاهرة في الموقع</h2>
+      <p class="muted">التعديلات تظهر للزوار في الصفحة الرئيسية وصفحة طريقة الاستخدام بعد حفظها.</p>
+      <form id="siteContentForm" class="admin-form">
+        <label>عنوان الموقع في تبويب المتصفح<input name="site_title"></label>
+        <label>اسم المنصة الظاهر في الشعار النصي<input name="brand_name"></label>
+        <label>رقم التواصل للاشتراك والاستفسار<input name="subscription_contact_phone" type="tel" inputmode="tel" placeholder="مثال: 07XXXXXXXX" maxlength="30"></label>
+        <p class="muted wide">سيظهر هذا الرقم للطلاب داخل صفحة المادة مع عبارة: للاستفسار والاشتراك تواصل على الرقم التالي.</p>
+        <label class="wide">رابط صورة الشعار (اختياري)<input name="logo_url" placeholder="https://example.com/logo.png"></label>
+        <label class="wide">رابط أيقونة المتصفح (اختياري)<input name="favicon_url" placeholder="https://example.com/favicon.png"></label>
+        <label>الشريط الصغير في الرئيسية<input name="hero_eyebrow"></label>
+        <label>عنوان الرئيسية<input name="hero_title"></label>
+        <label>العنوان الملوّن<input name="hero_emphasis"></label>
+        <label class="wide">وصف الرئيسية<textarea name="hero_description" rows="2"></textarea></label>
+        <label>عنوان قسم المميزات 1<input name="home_feature_1_title"></label>
+        <label>وصف الميزة 1<input name="home_feature_1_text"></label>
+        <label>عنوان قسم المميزات 2<input name="home_feature_2_title"></label>
+        <label>وصف الميزة 2<input name="home_feature_2_text"></label>
+        <label>عنوان قسم المميزات 3<input name="home_feature_3_title"></label>
+        <label>وصف الميزة 3<input name="home_feature_3_text"></label>
+        <label>عنوان الدعوة الرئيسية<input name="cta_title"></label>
+        <label>نص زر الدعوة<input name="cta_button"></label>
+        <label class="wide">وصف الدعوة الرئيسية<textarea name="cta_description" rows="2"></textarea></label>
+        <label>عنوان صفحة طريقة الاستخدام<input name="how_title"></label>
+        <label>الشريط الصغير لصفحة الطريقة<input name="how_eyebrow"></label>
+        <label class="wide">وصف صفحة الطريقة<textarea name="how_description" rows="2"></textarea></label>
+        <label>الخطوة الأولى – العنوان<input name="step_1_title"></label>
+        <label>الخطوة الأولى – الوصف<input name="step_1_text"></label>
+        <label>الخطوة الثانية – العنوان<input name="step_2_title"></label>
+        <label>الخطوة الثانية – الوصف<input name="step_2_text"></label>
+        <label>الخطوة الثالثة – العنوان<input name="step_3_title"></label>
+        <label>الخطوة الثالثة – الوصف<input name="step_3_text"></label>
+        <label class="wide">نص التذييل<input name="footer_text"></label>
+        <button class="btn btn-primary">حفظ محتوى الموقع</button><div id="siteContentMessage" class="form-error wide"></div>
+      </form>
+    </section>
+  </section>
+</main>
+<div id="adminToast" class="toast"></div>
+<script src="config.js"></script><script src="admin.js?v=enrollment-admin-fix-20261128"></script>
+</body></html>
